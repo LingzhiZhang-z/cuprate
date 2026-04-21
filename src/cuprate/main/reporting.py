@@ -1,4 +1,4 @@
-"""Result formatting and artifact writing for the main Hubbard workflow."""
+"""Artifact writing for the current stage-1 runtime."""
 
 from __future__ import annotations
 
@@ -8,17 +8,14 @@ from datetime import datetime
 import numpy as np
 
 from cuprate.io import (
-    build_projection_analysis_artifact,
-    build_spin_coupling_artifact_from_coeffs,
+    SpinCouplingTerms,
     build_spin_coupling_artifact_from_terms,
-    build_spin_coupling_terms_from_catalog,
-    deserialize_complex,
+    serialize_complex,
     write_cluster_points,
 )
 
 
 def _fmt_real(value) -> str:
-    """Format a scalar coefficient as a real number; scientific for small values."""
     x = float(np.real(value))
     if x == 0.0 or abs(x) >= 1e-4:
         return f"{x:.10f}"
@@ -33,8 +30,43 @@ def _pair_operator_str(pair_indices) -> str:
     return "".join(parts)
 
 
-def _site_list_str(sites) -> str:
-    return "{" + ", ".join(str(s) for s in sites) + "}"
+def _bond_vector(cluster, bond) -> tuple[int, int]:
+    site1, site2 = map(int, bond[:2])
+    dx = abs(cluster[site2][0] - cluster[site1][0])
+    dy = abs(cluster[site2][1] - cluster[site1][1])
+    return tuple(sorted((dx, dy), reverse=True))
+
+
+def _spin_coupling_terms_from_project(cluster, bond_groups, coeffs) -> SpinCouplingTerms:
+    two_site: dict[tuple[int, int], list[list]] = {}
+    four_site: list[list] = []
+    six_site: list[list] = []
+    eight_site: list[list] = []
+
+    for group, group_coeffs in zip(bond_groups, coeffs[1:]):
+        if not group:
+            continue
+        arity = len(group[0])
+        entries = [[*map(int, bond), coeff] for bond, coeff in zip(group, group_coeffs)]
+        if arity == 2:
+            vector = _bond_vector(cluster, group[0])
+            two_site.setdefault(vector, []).extend(entries)
+        elif arity == 4:
+            four_site.extend(entries)
+        elif arity == 6:
+            six_site.extend(entries)
+        elif arity == 8:
+            eight_site.extend(entries)
+        else:
+            raise ValueError(f"Unsupported bond arity for reporting: {arity}")
+
+    return SpinCouplingTerms(
+        constant=coeffs[0],
+        two_site=two_site,
+        four_site=four_site,
+        six_site=six_site,
+        eight_site=eight_site,
+    )
 
 
 def _write_spin_coupling_text(
@@ -48,47 +80,71 @@ def _write_spin_coupling_text(
 ) -> None:
     fit = artifact["fit"]
     groups = artifact["operators"]["groups"]
-    constant_term = deserialize_complex(artifact["operators"]["constant_term"])
-
-    f.write("=== Summary ===\n")
-    f.write(f"Hole: {hole}  Class: {class_idx}  Cluster: {cluster_idx}\n")
-    f.write(f"N={len(cluster)}  Sites: {' '.join(f'({x},{y})' for x, y in cluster)}\n")
-    f.write(
-        f"R\u00b2: {_fmt_real(fit['r_squared'])}  "
-        f"|T11-I|: {_fmt_real(fit['t11_minus_1_norm'])}  "
-        f"Overlap: {'n/a' if fit['overlap'] is None else _fmt_real(fit['overlap'])}\n"
+    constant_term = complex(
+        artifact["operators"]["constant_term"]["real"],
+        artifact["operators"]["constant_term"]["imag"],
     )
 
-    f.write("\n=== Two-site couplings ===\n")
-    for group in groups:
-        if group["arity"] != 2 or not group["terms"]:
-            continue
-        dx, dy = map(int, group["vector"])
-        f.write(f"{group['label']}  vector ({dx},{dy}):\n")
-        for term in group["terms"]:
-            site1, site2 = map(int, term["sites"])
-            coefficient = deserialize_complex(term["coefficient"])
-            f.write(f"    Sites {site1}-{site2}:  {_fmt_real(coefficient)}\n")
+    f.write(f"Hole: {hole}\n")
+    f.write(f"Class: {class_idx}\n")
+    f.write(f"Cluster: {cluster_idx}\n")
+    f.write(f"Rank: {artifact['metadata']['rank']}\n")
+    f.write(f"Computation time: {artifact['metadata']['computation_time_s']:.6f} seconds\n")
+    write_cluster_points(f, cluster)
 
-    for arity, section_name in ((4, "Four-site"), (6, "Six-site"), (8, "Eight-site")):
+    f.write("\n=== Bond Structure ===\n")
+    for group in groups:
+        if group["arity"] == 2:
+            dx, dy = map(int, group["vector"])
+            if group["terms"]:
+                f.write(f"Bond vector ({dx}, {dy}), {group['label']}:\n")
+                for idx, term in enumerate(group["terms"]):
+                    site1, site2 = map(int, term["sites"])
+                    x1, y1 = cluster[site1]
+                    x2, y2 = cluster[site2]
+                    f.write(f"    {idx}: Sites {site1}-{site2} ({x1},{y1})-({x2},{y2})\n")
+            else:
+                f.write(f"Bond vector ({dx}, {dy}), {group['label']}: (not present in cluster)\n")
+
+    multi_site_labels = {4: "Four-site bond", 6: "Six-site bond", 8: "Eight-site bond"}
+    for arity, header in multi_site_labels.items():
         multi_groups = [group for group in groups if group["arity"] == arity]
         if not multi_groups:
             continue
-        f.write(f"\n=== {section_name} couplings ===\n")
+        f.write(f"\n{header}\n")
         for group in multi_groups:
-            support_sites = sorted({int(site) for term in group["terms"] for site in term["sites"]})
-            f.write(f"Group {group['label']}: sites {_site_list_str(support_sites)}\n")
-            for term in group["terms"]:
-                coefficient = deserialize_complex(term["coefficient"])
-                f.write(f"    {_pair_operator_str(term['sites'])}:  {_fmt_real(coefficient)}\n")
+            for term_idx, term in enumerate(group["terms"], start=1):
+                f.write(
+                    f"    class 0 type {term_idx} : {_pair_operator_str(term['sites'])}\n"
+                )
 
-    f.write("\n=== Fit quality ===\n")
-    f.write(f"Constant term:   {_fmt_real(constant_term)}\n")
-    f.write(f"Relative error:  {_fmt_real(fit['relative_error'])}\n")
-    f.write(f"Residual:        {_fmt_real(fit['residual'])}\n")
-    f.write(f"R\u00b2:              {_fmt_real(fit['r_squared'])}\n")
-    f.write(f"|T11-I|:         {_fmt_real(fit['t11_minus_1_norm'])}\n")
-    f.write(f"Overlap:         {'n/a' if fit['overlap'] is None else _fmt_real(fit['overlap'])}\n")
+    f.write("\n=== Individual Bond Coefficients ===\n")
+    f.write(f"Constant term: {_fmt_real(constant_term)}\n")
+    for group in groups:
+        if group["arity"] == 2:
+            dx, dy = map(int, group["vector"])
+            if group["terms"]:
+                f.write(f"\nBond vector ({dx}, {dy}), {group['label']}:\n")
+                for idx, term in enumerate(group["terms"]):
+                    coeff = complex(term["coefficient"]["real"], term["coefficient"]["imag"])
+                    site1, site2 = map(int, term["sites"])
+                    f.write(f"    {idx}: Sites {site1}-{site2}: {coeff.real:.10f}  +  {coeff.imag:.10f}i\n")
+            else:
+                f.write(f"\nBond vector ({dx}, {dy}), {group['label']}: (not present in cluster)\n")
+        elif group["terms"]:
+            f.write(f"\n{group['label']}\n")
+            for term_idx, term in enumerate(group["terms"], start=1):
+                coeff = complex(term["coefficient"]["real"], term["coefficient"]["imag"])
+                f.write(
+                    f"    class 0 type {term_idx} : {_pair_operator_str(term['sites'])}: "
+                    f"{coeff.real:.10f}  +  {coeff.imag:.10f}i\n"
+                )
+
+    f.write("\n=== Individual Fit Error ===\n")
+    f.write(f"Relative Error: {fit['relative_error']:.10f}\n")
+    f.write(f"Residual: {fit['residual']:.10f}\n")
+    f.write(f"R^2: {fit['r_squared']:.10f}\n")
+    f.write(f"T11-1 norm: {fit['t11_minus_1_norm']:.10f}\n")
     f.write(f"Task is finished at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
 
@@ -100,25 +156,28 @@ def save_spin_coupling_result(
     rank: int,
     cluster_time: float,
     cluster,
-    spin_operator_catalog,
+    bond_groups,
     coeffs,
     error: tuple[float, float, float],
     t11m1_norm: float,
     overlap: float | None,
 ) -> dict:
     base_filename = f"{result_dir}/hole{hole}_class{class_idx}_cluster{cluster_idx}"
-    artifact = build_spin_coupling_artifact_from_coeffs(
+    artifact = build_spin_coupling_artifact_from_terms(
         cluster,
-        spin_operator_catalog,
-        coeffs,
-        error,
-        t11m1_norm,
-        overlap,
+        _spin_coupling_terms_from_project(cluster, bond_groups, coeffs),
         hole=hole,
         class_idx=class_idx,
         cluster_idx=cluster_idx,
+        fit={
+            "relative_error": float(error[0]),
+            "residual": float(error[1]),
+            "r_squared": float(error[2]),
+            "t11_minus_1_norm": float(t11m1_norm),
+            "overlap": None if overlap is None else float(overlap),
+        },
         metadata={
-            "rank": rank,
+            "rank": int(rank),
             "computation_time_s": float(cluster_time),
         },
     )
@@ -144,17 +203,30 @@ def save_projection_result(
     rank: int,
     cluster_time: float,
     cluster,
-    spin_operator_catalog,
-    model,
+    projection,
 ) -> dict:
     base_filename = f"{result_dir}/hole{hole}_class{class_idx}_cluster{cluster_idx}"
-    operator_artifact = build_spin_coupling_artifact_from_terms(
-        cluster,
-        build_spin_coupling_terms_from_catalog(spin_operator_catalog),
-        hole=hole,
-        class_idx=class_idx,
-        cluster_idx=cluster_idx,
-    )
+    artifact = {
+        "hole": int(hole),
+        "class_idx": int(class_idx),
+        "cluster_idx": int(cluster_idx),
+        "sites": [[int(x), int(y)] for x, y in cluster],
+        "projection": {
+            "t11_minus_1_norm": float(projection.t11m1_norm),
+            "overlap": None if projection.overlap is None else float(projection.overlap),
+            "selected_state_count": int(len(projection.selected_indices)),
+            "heff_dimension": [int(projection.heff.shape[0]), int(projection.heff.shape[1])],
+            "selected_indices": [int(idx) for idx in projection.selected_indices],
+            "double_occupation_expectation": [
+                float(value.real) for value in projection.selected_occupation
+            ],
+        },
+        "metadata": {
+            "rank": int(rank),
+            "computation_time_s": float(cluster_time),
+        },
+    }
+
     with open(f"{base_filename}_results.txt", "w") as f:
         f.write(f"Hole: {hole}\n")
         f.write(f"Class: {class_idx}\n")
@@ -162,76 +234,24 @@ def save_projection_result(
         f.write(f"Rank: {rank}\n")
         f.write(f"Computation time: {cluster_time:.6f} seconds\n")
         write_cluster_points(f, cluster)
-
-        f.write("\n=== Bond Structure ===")
-        for group in operator_artifact["operators"]["groups"]:
-            if group["arity"] != 2:
-                continue
-            dx, dy = map(int, group["vector"])
-            f.write(f"\nBond vector ({dx}, {dy}), {group['label']}:")
-            if not group["terms"]:
-                f.write(" (not present in cluster)\n")
-                continue
-            f.write("\n")
-            for idx, term in enumerate(group["terms"]):
-                site1, site2 = map(int, term["sites"])
-                x1, y1 = cluster[site1]
-                x2, y2 = cluster[site2]
-                f.write(f"    {idx}: Sites {site1}-{site2} ({x1},{y1})-({x2},{y2})\n")
-
-        four_site_groups = [group for group in operator_artifact["operators"]["groups"] if group["arity"] == 4]
-        if four_site_groups:
-            f.write("\nFour-site bonds:\n")
-            for group in four_site_groups:
-                f.write(f"    Group {group['label']}:\n")
-                for term_idx, term in enumerate(group["terms"], start=1):
-                    f.write(f"      type {term_idx}: Four-site bond: {term['sites']}\n")
-                f.write("\n")
-
-        six_site_groups = [group for group in operator_artifact["operators"]["groups"] if group["arity"] == 6]
-        if six_site_groups:
-            f.write("\nSix-site bonds:\n")
-            for group in six_site_groups:
-                f.write(f"    Group {group['label']}:\n")
-                for term_idx, term in enumerate(group["terms"], start=1):
-                    f.write(f"      type {term_idx}: Six-site bond: {term['sites']}\n")
-                f.write("\n")
-
-        df = model.downfold
         f.write("\n=== Projection Diagnostics ===\n")
         f.write("Spin couplings are not reported for MODE=fixed_sz_s2.\n")
-        f.write("This mode fixes a single total-spin sector and does not determine unique SU(2)-invariant couplings.\n")
-        f.write(f"T11-1 norm: {df.t11m1_norm:.10f}\n")
-        if df.overlap is not None:
-            f.write(f"Overlap: {df.overlap:.10f}\n")
-        f.write(f"Selected state count: {len(df.selected_indices)}\n")
-        f.write(f"Heff dimension: {df.heff.shape[0]} x {df.heff.shape[1]}\n")
+        f.write(f"T11-1 norm: {projection.t11m1_norm:.10f}\n")
+        f.write(f"Selected state count: {len(projection.selected_indices)}\n")
+        f.write(f"Heff dimension: {projection.heff.shape[0]} x {projection.heff.shape[1]}\n")
         f.write("\nSelected eigenstate indices:\n")
-        f.write(" ".join(str(int(idx)) for idx in np.atleast_1d(df.selected_indices)) + "\n")
+        f.write(" ".join(str(int(idx)) for idx in projection.selected_indices) + "\n")
         f.write("\nSelected double occupation expectation:\n")
-        f.write(" ".join(f"{value.real:.10f}" for value in np.atleast_1d(df.selected_occupation)) + "\n")
-
-        if model.S2 is not None and model.S2.diag is not None:
-            f.write("\nSelected S^2 diagnostics:\n")
-            for idx in np.atleast_1d(df.selected_indices):
-                f.write(
-                    f"  idx {int(idx)}: "
-                    f"S2={model.S2.diag[int(idx)]:.10f}, "
-                    f"error={model.S2.error[int(idx)].real:.10e}\n"
-                )
-
+        f.write(" ".join(f"{value.real:.10f}" for value in projection.selected_occupation) + "\n")
+        f.write("\nSelected S^2 diagnostics:\n")
+        for idx in projection.selected_indices:
+            s2_value = projection.s2_diag[int(idx), 0]
+            s2_error = projection.s2_diag[int(idx), 1]
+            f.write(
+                f"  idx {int(idx)}: S2={s2_value.real:.10f}, error={s2_error.real:.10e}\n"
+            )
         f.write(f"Task is finished at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-    artifact = build_projection_analysis_artifact(
-        cluster,
-        model,
-        hole=hole,
-        class_idx=class_idx,
-        cluster_idx=cluster_idx,
-        metadata={
-            "rank": rank,
-            "computation_time_s": float(cluster_time),
-        },
-    )
+
     with open(f"{base_filename}_results.json", "w") as f:
         json.dump(artifact, f, indent=2)
     return artifact

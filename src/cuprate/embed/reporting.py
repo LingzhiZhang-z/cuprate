@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from itertools import combinations
 from math import sqrt
 
-from cuprate.clusters import find_connected_sites
 from cuprate.io import get_all_possible_vectors, k4s
 
 from .core import normalize_four_sites
@@ -17,6 +17,26 @@ FOUR_SITE_SHAPES = [
     "\n      4\n      |\n1--2--3\n",
     "\n   3--4\n   |\n1--2\n",
 ]
+
+
+def _neighbors(point):
+    x, y = point
+    return {(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)}
+
+
+def _connected_four_site_indices(cluster):
+    for indices in combinations(range(len(cluster)), 4):
+        subset = {cluster[idx] for idx in indices}
+        stack = [cluster[indices[0]]]
+        visited = {stack[0]}
+        while stack:
+            current = stack.pop()
+            for neighbor in _neighbors(current):
+                if neighbor in subset and neighbor not in visited:
+                    visited.add(neighbor)
+                    stack.append(neighbor)
+        if len(visited) == 4:
+            yield list(indices)
 
 
 def write_couplings_embed(f, couplings, cluster):
@@ -55,7 +75,7 @@ def write_couplings_embed(f, couplings, cluster):
 
     f.write("\nFour-site Bond:\n")
     grouped_four_site = [[] for _ in range(5)]
-    for indices in find_connected_sites(cluster, 4):
+    for indices in _connected_four_site_indices(cluster):
         idx_type, sites = normalize_four_sites(indices, cluster)
         key1 = k4s(sites[0], sites[1], sites[2], sites[3])
         key2 = k4s(sites[0], sites[3], sites[1], sites[2])

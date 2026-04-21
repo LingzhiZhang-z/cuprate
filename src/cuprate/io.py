@@ -11,12 +11,9 @@ import networkx as nx
 import numpy as np
 
 from cuprate.clusters import (
-    _canonicalize_pair,
     canonical_form,
     count_holes,
-    EDGE_MATCHER,
-    generate_adjacency_matrix,
-    graph_from_adj,
+    graph_from_sites,
 )
 
 
@@ -528,9 +525,10 @@ def _multi_site_label_prefix(arity: int) -> str:
 
 
 def _canonical_pair_descriptor(cluster, site1: int, site2: int) -> tuple[int, int, int, int, int]:
-    site1, site2 = _canonicalize_pair((int(site1), int(site2)), cluster)
-    dx = cluster[site2][0] - cluster[site1][0]
-    dy = cluster[site2][1] - cluster[site1][1]
+    site1, site2 = sorted((int(site1), int(site2)))
+    dx = abs(cluster[site2][0] - cluster[site1][0])
+    dy = abs(cluster[site2][1] - cluster[site1][1])
+    dx, dy = sorted((dx, dy), reverse=True)
     return (dx * dx + dy * dy, dx, dy, site1, site2)
 
 
@@ -795,8 +793,6 @@ def match_cluster_in_catalog(target_cluster, cluster_catalog):
     matches = []
 
     target_canon = canonical_form(target_cluster)
-    target_graph = graph_from_adj(generate_adjacency_matrix(target_cluster))
-    target_graph_canon = graph_from_adj(generate_adjacency_matrix(target_canon))
     nsite = len(target_canon)
     hole = count_holes(target_canon)
 
@@ -806,28 +802,21 @@ def match_cluster_in_catalog(target_cluster, cluster_catalog):
     clusters = cluster_catalog[nsite][hole]
     for class_idx in clusters:
         first_cluster = next(iter(clusters[class_idx].values()))
-        ref_graph = graph_from_adj(generate_adjacency_matrix(first_cluster))
+        if canonical_form(first_cluster) != target_canon:
+            continue
+
         graph_matcher = nx.algorithms.isomorphism.GraphMatcher(
-            ref_graph, target_graph, edge_match=EDGE_MATCHER
+            graph_from_sites(first_cluster),
+            graph_from_sites(target_cluster),
         )
-        graph_matcher_canon = nx.algorithms.isomorphism.GraphMatcher(
-            ref_graph, target_graph_canon, edge_match=EDGE_MATCHER
-        )
+        if not graph_matcher.is_isomorphic():
+            continue
 
-        if graph_matcher.is_isomorphic() and graph_matcher_canon.is_isomorphic():
-            mapping = graph_matcher.mapping
-            mapping_canon = graph_matcher_canon.mapping
-            coord_mapping = [mapping[i] for i in range(len(first_cluster))]
-            coord_mapping_canon = [mapping_canon[i] for i in range(len(first_cluster))]
+        coord_mapping = [graph_matcher.mapping[i] for i in range(len(first_cluster))]
 
-            for rank_idx in clusters[class_idx]:
-                ref_cluster = clusters[class_idx][rank_idx]
-                is_valid = all(
-                    ref_cluster[i] == target_canon[coord_mapping_canon[i]]
-                    for i in range(len(ref_cluster))
-                )
-                if is_valid:
-                    matches.append((nsite, hole, class_idx, rank_idx, coord_mapping))
+        for rank_idx, ref_cluster in clusters[class_idx].items():
+            if canonical_form(ref_cluster) == target_canon:
+                matches.append((nsite, hole, class_idx, rank_idx, coord_mapping))
 
     if not matches:
         raise ValueError(f"No matching cluster found for cluster: {target_cluster}, {target_canon}")
