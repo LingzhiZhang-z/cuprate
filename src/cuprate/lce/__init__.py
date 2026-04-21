@@ -1,11 +1,4 @@
-from importlib import import_module
+from cuprate.io import parse_lce_cli_args
 
 
-__all__ = ["parse_arguments", "write_operators"]
-
-
-def __getattr__(name):
-    if name in __all__:
-        module = import_module(".__main__", __name__)
-        return getattr(module, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__all__ = ["parse_lce_cli_args"]

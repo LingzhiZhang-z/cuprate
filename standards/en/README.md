@@ -1,0 +1,49 @@
+# Cuprate Scientific Standards
+
+## Authority
+Code implementation MUST follow the English standards under `./standards/en/`.
+Files under `./standards/zh/` are translations only.
+If EN and ZH conflict, EN is authoritative.
+
+## Organizing Principle
+These standards are organized by the physics pipeline: each file covers one
+stage of the computation, from cluster geometry through to supercell embedding.
+They are not organized by the current Python module layout.
+
+## Standards
+
+| # | File | Scope |
+|---|------|-------|
+| 00 | `00-CONVENTIONS.md` | Writing rules, symbol table, naming conventions, numerical tolerances |
+| 01 | `01-CLUSTERS.md` | Square-lattice enumeration, weighted-graph classification, bond types, multi-site patterns |
+| 02 | `02-HAMILTONIAN.md` | Fock-state encoding, basis construction, single-band Hubbard Hamiltonian, diagonalisation |
+| 03 | `03-SYMMETRY_SECTORS.md` | $S_z$ blocking, $S^2$ basis transform, spectrum reconstruction, five modes |
+| 04 | `04-DOWNFOLDING.md` | Eigenstate selection, $T_{11}$, $H_{\text{eff}}$ via SVD, spin-coupling fit |
+| 05 | `05-LCE_AND_EMBEDDING.md` | Linked-cluster expansion, supercell embedding |
+| 06 | `06-RUNTIME.md` | MPI distribution, I/O layout, CLI parameters |
+| 07 | `07-TESTING.md` | Regression testing strategy, reference data, naming translation |
+| 08 | `08-OPERATOR_OUTPUT.md` | Spin-coupling operators, canonical pairing order, output formats |
+
+## Code ↔ Standards Mapping
+
+| Code module | Primary standard |
+|-------------|-----------------|
+| `clusters.py` | 01-CLUSTERS |
+| `states.py` | 02-HAMILTONIAN |
+| `hubbard.py` | 02-HAMILTONIAN, 03-SYMMETRY_SECTORS, 04-DOWNFOLDING |
+| `spin.py` | 03-SYMMETRY_SECTORS, 04-DOWNFOLDING |
+| `selection.py` | 04-DOWNFOLDING |
+| `lce/__main__.py` | 05-LCE_AND_EMBEDDING |
+| `embed/__main__.py` | 05-LCE_AND_EMBEDDING |
+| `io.py` | 06-RUNTIME |
+
+## Required Reading Order
+1. `00-CONVENTIONS.md`
+2. `01-CLUSTERS.md`
+3. `02-HAMILTONIAN.md`
+4. `03-SYMMETRY_SECTORS.md`
+5. `04-DOWNFOLDING.md`
+6. `05-LCE_AND_EMBEDDING.md`
+7. `06-RUNTIME.md`
+8. `07-TESTING.md`
+9. `08-OPERATOR_OUTPUT.md`
