@@ -51,6 +51,13 @@ def _perfect_matchings(items):
     return result
 
 
+def cluster_label(hole: int, class_idx: int, cluster_idx: int | None = None) -> str:
+    label = f"hole{hole}_class{class_idx}"
+    if cluster_idx is not None:
+        label += f"_idx{cluster_idx}"
+    return label
+
+
 @dataclass(frozen=True)
 class Cluster:
     """Single cluster: geometry (sites, bonds) plus enumeration tags (hole, class_idx)."""
@@ -65,7 +72,7 @@ class Cluster:
         return len(self.sites)
 
     def label(self) -> str:
-        return f"hole{self.hole}_class{self.class_idx}_idx{self.cluster_idx}"
+        return cluster_label(self.hole, self.class_idx, self.cluster_idx)
 
     def generate_bonds(self, N: int, is_connected: bool) -> list[list[Sequence[int]]]:
         """Bond groups of N-site operators. One singleton group per (subset, pairing)."""
@@ -318,5 +325,4 @@ def classify_two_site_bonds(cluster):
         bond_types.items(),
         key=lambda item: item[0][0] ** 2 + item[0][1] ** 2,
     )
-
 

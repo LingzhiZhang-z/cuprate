@@ -23,6 +23,15 @@ MODE_ONE_SZ = "one_sz"
 MODE_ONE_SZ_S2 = "one_sz_s2"
 MODE_ONE_SZ_BY_S2 = "one_sz_by_s2"
 
+MODE_ALIASES = {
+    "full": MODE_SINGLE,
+    "fixed_sz": MODE_ONE_SZ,
+    "block_sz_full": MODE_BY_SZ,
+    "fixed_sz_s2": MODE_ONE_SZ_S2,
+    "block_sz_s2_full": MODE_BY_SZ_S2,
+    "fixed_sz_s2_all": MODE_ONE_SZ_BY_S2,
+}
+
 BUCKET_FULL = "full"
 BUCKET_SZ_BLOCK = "sz_block"
 BUCKET_SZ_S2_BLOCK = "sz_s2_block"
@@ -374,7 +383,7 @@ class HubbardModel:
         return build_hub_hamiltonian(list(basis_states), self.N, self.U, self.bonds, self.hoppings)
 
     def _validate_mode(self, mode: str, twoSz: int | None, twoS: int | None) -> str:
-        mode = mode.lower()
+        mode = MODE_ALIASES.get(mode.lower(), mode.lower())
         if mode not in MODE_ARGS:
             raise ValueError(f"Unsupported Hubbard solver mode: {mode}")
         needs_twoSz, needs_twoS = MODE_ARGS[mode]

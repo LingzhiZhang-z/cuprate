@@ -32,7 +32,7 @@ from cuprate.io import (
     Params,
     build_path_spec,
 )
-from cuprate.states import calc_double_occupation_matrix, site_code
+from cuprate.states import calc_double_occupation_matrix, calc_fourS2_matrix, site_code
 
 from .reporting import save_projection_result, save_spin_coupling_result
 
@@ -67,6 +67,17 @@ def _solver_mode(mode_spec) -> str:
         MODE_FIXED_SZ_S2: MODE_ONE_SZ_S2,
         MODE_BLOCK_SZ_S2_FULL: MODE_BY_SZ_S2,
     }[mode_spec.mode]
+
+
+def _runtime_solver_mode(params: Params, mode_spec) -> str:
+    if params.match_spin_sectors:
+        if mode_spec.mode not in (MODE_FULL, MODE_BLOCK_SZ_FULL, MODE_BLOCK_SZ_S2_FULL):
+            raise RuntimeError(
+                "MATCH_SPIN_SECTORS is only supported for MODE=full, MODE=block_sz_full, "
+                "and MODE=block_sz_s2_full."
+            )
+        return MODE_BY_SZ_S2
+    return _solver_mode(mode_spec)
 
 
 def _selection_method(params: Params) -> str:
@@ -168,6 +179,9 @@ def _build_project_block(spectrum: Spectrum, reconstruct_full: bool) -> Block:
 
 
 def _selection_spectrum(spectrum: Spectrum, project_block: Block, params: Params) -> Spectrum:
+    if params.match_spin_sectors:
+        blocks = [_reorder_block_legacy(block) for block in _ordered_blocks(spectrum)]
+        return Spectrum(spectrum.N, spectrum.nelec, spectrum.mode, blocks, cluster=spectrum.cluster)
     if params.select == "block" and len(spectrum.blocks) > 1:
         blocks = [_reorder_block_legacy(block) for block in _ordered_blocks(spectrum)]
         return Spectrum(spectrum.N, spectrum.nelec, spectrum.mode, blocks, cluster=spectrum.cluster)
@@ -200,13 +214,22 @@ def _double_occ_expectation(block: Block) -> np.ndarray:
     return np.diag(block.eigvecs.conj().T @ dom @ block.eigvecs)
 
 
-def _s2_diagonal(spectrum: Spectrum) -> np.ndarray:
-    rows = []
-    for block in _ordered_blocks(spectrum):
-        for qnum in block.quantum_numbers():
-            s2_value = 0.25 * qnum["twoS"] * (qnum["twoS"] + 2)
-            rows.append([complex(s2_value, 0.0), 0.0 + 0.0j, 1.0 + 0.0j])
-    return np.asarray(rows, dtype=complex)
+def _s2_diagonal(project_block: Block) -> np.ndarray:
+    basis_fourS2 = calc_fourS2_matrix(project_block.basis_states, project_block.N)
+    matrix_fourS2 = project_block.eigvecs.conj().T @ basis_fourS2 @ project_block.eigvecs
+    square_fourS2 = (
+        project_block.eigvecs.conj().T
+        @ basis_fourS2
+        @ basis_fourS2
+        @ project_block.eigvecs
+    )
+    diag = np.array([matrix_fourS2[i, i].real * 0.25 for i in range(len(matrix_fourS2))], dtype=complex)
+    error = 0.0625 * np.array(
+        [square_fourS2[i, i] - matrix_fourS2[i, i] ** 2 for i in range(len(matrix_fourS2))],
+        dtype=complex,
+    )
+    weight = np.ones(len(diag), dtype=complex)
+    return np.column_stack([diag, error, weight])
 
 
 def _adiabatic_seed_paths(params: Params, hole: int, class_idx: int) -> dict[str, str | bool]:
@@ -320,12 +343,9 @@ def cluster_process(
     hole: int,
     class_idx: int,
 ) -> FamilyProjection:
-    if params.match_spin_sectors:
-        raise NotImplementedError("MATCH_SPIN_SECTORS is not implemented on the runtime path yet.")
-
     model = HubbardModel(cluster, params.U, params.t)
     spectrum = model.solve(
-        _solver_mode(mode_spec),
+        _runtime_solver_mode(params, mode_spec),
         twoSz=mode_spec.twoSz,
         twoS=mode_spec.twoS,
     )
@@ -342,7 +362,7 @@ def cluster_process(
 
     heff, t11m1 = _evaluate_block(project_block, selected_indices)
     double_occ = np.asarray(_double_occ_expectation(project_block), dtype=complex)
-    s2_diag = _s2_diagonal(spectrum)
+    s2_diag = _s2_diagonal(project_block)
     s2_selected = (
         s2_diag[selected_indices]
         if len(selected_indices)
