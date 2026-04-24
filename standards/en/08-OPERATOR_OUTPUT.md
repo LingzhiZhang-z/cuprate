@@ -143,18 +143,34 @@ MUST:
   Each sidecar contains the same payload shape as the corresponding entry in the consolidated results.
 - File name: `results.json` in the run output directory.
 - Contains all cluster results for the run in a single file.
+- `projection` is required for spin-coupling results because it is the durable
+  location for selected eigenstate indices and per-block projection diagnostics.
 - Structure:
   ```json
   {
     "schema_version": 2,
     "result_kind": "spin_couplings",
-    "run_params": {"U": 1.0, "t": 0.24, "N": 4, "MODE": "full"},
+    "run_params": {"U": 1.0, "t": 0.24, "N": 4, "MODE": "full", "workflow": "greedy"},
     "clusters": [
       {
         "hole": 0,
         "class_idx": 0,
         "cluster_idx": 0,
         "sites": [[0,0], [1,0], [0,1], [1,1]],
+        "projection": {
+          "method": "greedy",
+          "blocks": [
+            {
+              "block": "twoSz_all_twoS_all",
+              "twoSz": null,
+              "twoS": null,
+              "selected_indices": [0, 1, 2, 3],
+              "t11_minus_1_norm": 0.0,
+              "overlap": null,
+              "selection_info": {}
+            }
+          ]
+        },
         "operators": {
           "constant_term": {"real": ..., "imag": ...},
           "groups": [...]
@@ -187,6 +203,12 @@ MUST:
   the prefix convention in §1 (`K1`, `K2`, ...; `L1`, `L2`, ...).
 - Per-cluster metadata (`rank`, `computation_time_s`) lives in a `metadata`
   sub-object, not at the top level.
-- `projection_analysis` results follow the same consolidated structure with
-  `projection` in place of `operators` + `fit`.
-- LCE and embed read from this consolidated JSON, not from text files.
+- Each entry in `projection.blocks` records selected eigenvector column indices
+  in that block's solved eigenvector frame.
+- `selection_info` stores method-specific diagnostics. It may contain compact
+  summary fields for `greedy_multi`; detailed trial logs may also be written as
+  JSONL by the selector, but the final `results.json` is the durable output.
+- `projection_analysis` results use the same consolidated structure with
+  `projection` and without `operators` or `fit`.
+- Future LCE/embed workchains must read from this consolidated JSON, not from
+  text files.

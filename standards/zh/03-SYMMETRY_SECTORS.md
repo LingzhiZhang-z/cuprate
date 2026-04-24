@@ -7,15 +7,15 @@ $S_z$ 分块、固定 $S_z$ 上的 $S^2$ 对角化，以及可选的全谱重构
 MUST:
 - 半填充 $N$ 个格点时，$S_z$ 取值从 $-N/2$ 到 $N/2$，步长为整数
   （$N$ 为奇数时为半整数步长）。
-- 仅计算非负 $S_z$ 值；负扇区通过自旋翻转对称性获得。
+- 当请求 all-`Sz` 模式时，直接构造所有合法的 `twoSz` 扇区。
 - 每个 $S_z$ 扇区的维度为 $\binom{N}{N_\uparrow} \cdot \binom{N}{N_\downarrow}$，
   其中 $N_\uparrow = N/2 + S_z$，$N_\downarrow = N/2 - S_z$。
 - 运行时输入和路径名使用规范整数标签 `twoSz = 2 S_z` 和 `twoS = 2 S`。
 
 Code form:
 ```python
-twoSz_list = nonneg_twoSz_values(N)  # [0, 2, ..., N] 或 [1, 3, ..., N]
-sz_states[idx] = generate_states(N, N, twoSz=twoSz)
+twoSz_values = range(-N, N + 1, 2)
+states = generate_states(N, N, twoSz=twoSz)
 ```
 
 ## 2) Fock 基中的 `fourS2 = 4 S^2` 矩阵 (MUST)
@@ -52,12 +52,14 @@ MUST:
   并除以标准 SU(2) 降阶系数来得到。
 - 对每个 `(twoSz, twoS)` 扇区，不同 `D` 块得到的列按 `D` 递增拼接，
   因而 `D=0` 的 pure-spin 列天然排在最前面。
-- 实现直接返回显式的 $(twoSz, twoS)$ 扇区元数据、每个扇区的变换矩阵，
-  每个扇区列对应的显式双占据本征值，以及该扇区的 pure-spin 维度。
+- 实现返回显式的 `S2SectorBlock` 记录。每条记录是一个
+  `(twoSz, twoS, D)` 变换块，包含固定 `D` 的基态和该块的变换列。
 
 Code form:
 ```python
-sector_list, transforms, double_occ_eigvals, dimspin = build_S2_sectors(twoSz_list, sz_states, N)
+grouped_states = group_states(generate_states(N, N), N)
+_hw, multiplets = build_S2_multiplets(grouped_states, N)
+sector_blocks = build_S2_sectors(grouped_states, multiplets)
 ```
 
 Validation:
@@ -73,24 +75,23 @@ MUST:
 
 Code form:
 ```python
-sector_list, transforms, dimspin = build_S2_sectors(twoSz_list, sz_states, N)
-for idx, (_twoSz, _twoS, sz_sector_index) in enumerate(sector_list):
-    U = transforms[idx]
-    H_S2[idx] = U.conj().T @ H_Sz[sz_sector_index] @ U
+transforms = build_S2_transforms(grouped_states, N, sector_blocks)
+U = transforms[(twoSz, twoS)]
+H_S2 = U.conj().T @ H_Sz @ U
 ```
 
 ## 5) 全谱重构 (MUST)
 
 MUST:
-- 在 `block_sz_full` 或 `block_sz_s2_full` 模式下，扇区本征系统被组装为全谱。
-- 对 $S_z > 0$，负 $S_z$ 扇区通过自旋翻转获得：
-  $|s'\rangle = $ 翻转所有单占据自旋，本征向量每个基矢态获得符号 $(-1)^D$。
-- 全局索引记录重构本征向量矩阵的哪一列属于哪个扇区块。
+- 扇区本征系统保持为 `Block` 对象，直到调用者显式合并它们。
+- `HubbardModel.merge_by_s2()` 合并同一 `twoSz` 下的所有 `twoS` 扇区：
+  先构造块对角的扇区矩阵，再变换回固定 `twoSz` 的 Fock 基。
+- `HubbardModel.merge_by_sz()` 将所有固定 `twoSz` 的 Fock 坐标块合并成一个完整 Fock 坐标块。
 
 Code form:
 ```python
-reconstruct_from_sz(...)  # 用于 block_sz_full
-reconstruct_from_S2(...)  # 用于 block_sz_s2_full
+model.merge_by_s2()  # block_sz_s2_full -> block_sz_full frame
+model.merge_by_sz()  # block_sz_full -> full frame
 ```
 
 Validation:
@@ -101,19 +102,18 @@ Validation:
 MUST:
 - 代码支持恰好五种模式：
 
-| 模式 | 分块 | 重构 | 自旋耦合 |
-|------|------|------|----------|
-| `full` | 无 | 不适用 | 是 |
-| `fixed_sz` | 单个 $S_z$ | 否 | 是 |
-| `block_sz_full` | 所有 $S_z$ | 是 | 是 |
-| `fixed_sz_s2` | 单个 $(S_z, S)$ | 否 | 否（仅投影分析） |
-| `block_sz_s2_full` | 所有 $(S_z, S)$ | 是 | 是 |
+| 模式 | 可选合并前的块 | 可选重构 |
+|------|----------------|----------|
+| `full` | 一个完整 Fock 块 | 不适用 |
+| `fixed_sz` | 一个固定 `twoSz` 块 | 否 |
+| `block_sz_full` | 所有固定 `twoSz` 块 | `merge_by_sz()` |
+| `fixed_sz_s2` | 一个固定 `(twoSz,twoS)` 块 | 否 |
+| `block_sz_s2_full` | 所有固定 `(twoSz,twoS)` 块 | 先 `merge_by_s2()`，再 `merge_by_sz()` |
 
-- `fixed_sz_s2` 不产生自旋耦合，因为单个总自旋扇区
-  无法确定唯一的 SU(2) 不变耦合常数。它仅报告投影诊断。
+- Projection 和 spin fitting 都在当前 `Block` 坐标框架内逐块执行。
+  `fixed_sz_s2` 本身不禁止拟合；调用者负责选择能回答目标物理问题的块框架。
 
 Code form:
 ```python
-ModeSpec = resolve_mode_spec(params)
-# ModeSpec.result_kind == "projection_analysis" 仅对 fixed_sz_s2 成立
+model.set_symmetry(mode, twoSz=twoSz, twoS=twoS)
 ```

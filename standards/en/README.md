@@ -20,7 +20,7 @@ They are not organized by the current Python module layout.
 | 03 | `03-SYMMETRY_SECTORS.md` | $S_z$ blocking, $S^2$ basis transform, spectrum reconstruction, five modes |
 | 04 | `04-DOWNFOLDING.md` | Eigenstate selection, $T_{11}$, $H_{\text{eff}}$ via SVD, spin-coupling fit |
 | 05 | `05-LCE_AND_EMBEDDING.md` | Linked-cluster expansion, supercell embedding |
-| 06 | `06-RUNTIME.md` | MPI distribution, I/O layout, CLI parameters |
+| 06 | `06-RUNTIME.md` | Workchain, solve cache, derived-output ownership |
 | 07 | `07-TESTING.md` | Regression testing strategy, reference data, naming translation |
 | 08 | `08-OPERATOR_OUTPUT.md` | Spin-coupling operators, canonical pairing order, output formats |
 
@@ -31,11 +31,13 @@ They are not organized by the current Python module layout.
 | `clusters.py` | 01-CLUSTERS |
 | `states.py` | 02-HAMILTONIAN |
 | `hubbard.py` | 02-HAMILTONIAN, 03-SYMMETRY_SECTORS, 04-DOWNFOLDING |
-| `spin.py` | 03-SYMMETRY_SECTORS, 04-DOWNFOLDING |
-| `selection.py` | 04-DOWNFOLDING |
-| `lce/__main__.py` | 05-LCE_AND_EMBEDDING |
-| `embed/__main__.py` | 05-LCE_AND_EMBEDDING |
-| `io.py` | 06-RUNTIME |
+| `sectors.py` | 03-SYMMETRY_SECTORS |
+| `manifold.py` | 04-DOWNFOLDING |
+| `mpi.py` | 06-RUNTIME |
+
+`src/cuprate/back/` contains old workchain/LCE/embed code for reference only.
+It is not the active module layout and must not define production compatibility
+requirements.
 
 ## Required Reading Order
 1. `00-CONVENTIONS.md`

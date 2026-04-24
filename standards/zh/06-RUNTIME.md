@@ -1,98 +1,116 @@
 # 06-运行时
 
-MPI 任务分配、I/O 约定与路径布局。
+当前 `HubbardModel` + `Block` 核心的 active workchain、cache 与 I/O 契约。
 
-## 1) MPI 执行模型 (MUST)
+## 1) Active 运行时边界 (MUST)
 
 MUST:
-- 代码使用 `mpi4py` 的 `MPI.COMM_WORLD`。
-- Rank 0 为广播和打印的根节点。
-- 任务分配：轮询（round-robin），多余任务分配给后序 rank。
+- 当前 active 源码树没有生产级 `cuprate.main`、`cuprate.lce` 或
+  `cuprate.embed` 入口点。
+- 运行时代码必须基于 active 模块重建：
+  `clusters.py`、`states.py`、`sectors.py`、`manifold.py`、`hubbard.py`
+  和 `mpi.py`。
+- `src/cuprate/back/` 仅作为参考材料。不要添加会执行或保留旧 workchain
+  结构的兼容路径。
+
+## 2) 单团簇生命周期 (MUST)
+
+MUST:
+- 单团簇计算遵循以下分阶段生命周期：
 
 Code form:
 ```python
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-size = comm.Get_size()
-# distribute_work: items_per_rank = total // size, 余数分给最后的 rank
+model = HubbardModel(cluster, U, t)
+model.set_symmetry(mode, twoSz=twoSz, twoS=twoS)
+model.build_hamiltonians()
+model.solve(cache_mode=cache_mode, cache_dir=cache_dir)
+model.project(method=workflow, **select_kwargs)
+model.fit(bond_groups=bond_groups)
 ```
 
-## 2) 执行流水线 (MUST)
+- 可选重构必须显式调用：
+
+Code form:
+```python
+model.merge_by_s2()  # 合并每个 twoSz 内的 twoS 扇区
+model.merge_by_sz()  # 将 fixed-twoSz 块合并成一个 full 块
+```
+
+- 公共规范模式为 `full`、`fixed_sz`、`block_sz_full`、
+  `fixed_sz_s2` 和 `block_sz_s2_full`。
+- 内部 mode 常量和 cache bucket 由 `hubbard.py` 拥有。
+
+## 3) 本征系统 Cache (MUST)
 
 MUST:
-- 三个入口点按顺序执行（不在同一进程中）：
-  1. `python -m cuprate.main` — 团簇枚举、哈密顿量求解、选择、降维、拟合。
-  2. `python -m cuprate.lce` — 读取步骤 1 的结果，执行子团簇减法。
-  3. `python -m cuprate.embed` — 读取步骤 2 的结果，��入超胞。
-- 仅 `cuprate.main` 使用 MPI。LCE 和 embed 为单进程。
+- solve cache 只存储已求解的 blocks：basis states、本征值、本征向量、
+  Hamiltonian，以及可选 `basis_transform`。
+- solve cache 不存储 selected indices、`H_eff`、`T11` 或 fit 结果。
+- `HubbardModel.solve()` 精确支持四种 cache mode：
 
-## 3) 目录布局 (MUST)
+| cache_mode | 行为 |
+|------------|------|
+| `none` | 在内存中求解每个当前 block；不使用磁盘 cache |
+| `load` | 从磁盘加载每个当前 block；缺任何 block 都失败 |
+| `save` | 求解每个当前 block，然后保存每个 block |
+| `partial` | 加载已有 block，并求解/保存缺失 block |
 
-MUST:
-- `cuprate.main` 写入：
-  ```
-  ./Block/{base_dir}/{run_dir}/
-  ```
-  其中 `base_dir = U{U:.4f}_t{t:.4f}`，
-  `run_dir` 遵循规范语法：
-  ```
-  N{N}[ _twoSz_<value> | _twoSz_all ][ _twoS_<value> | _twoS_all ][_match_spin_sectors][_{workflow}][_restart]
-  ```
-  各模式对应：
-  - `full` -> `N{N}`
-  - `fixed_sz` -> `N{N}_twoSz_<value>`
-  - `fixed_sz_s2` -> `N{N}_twoSz_<value>_twoS_<value>`
-  - `block_sz_full` -> `N{N}_twoSz_all`
-  - `block_sz_s2_full` -> `N{N}_twoSz_all_twoS_all`
-- `twoSz` / `twoS` 路径槽中仅允许 `all` 和 `n` 作为非数字标记。
-- 负的固定值用 `n` 替代负号，如 `twoSz_n1` 表示 $2S_z = -1$。
+- `load`、`save` 和 `partial` 需要 `cache_dir`；`none` 禁止传入 `cache_dir`。
+- `HubbardModel.save(cache_dir)` 和 `Block.save(cache)` 必须写出同一种已求解 block 格式。
 
-- `cuprate.lce` 从 `data_transfer/Block/Block_{base_dir}/` 读取，写入 `data_transfer/LCE/LCE_{base_dir}/`。
+Code form:
+```python
+cache = Path(cache_dir) / model.label() / cluster.label() / model._bucket
+block.save(cache)
+block = Block.load(cache, twoSz, twoS)
+```
 
-- `cuprate.embed` 从 `data_transfer/LCE/LCE_{base_dir}/` 读取，写入 `data_transfer/Embed/Embed_{base_dir}/`。
-
-## 4) 文件命名 (MUST)
+## 4) Workchain 计算模型 (MUST)
 
 MUST:
-- 每团簇结果：`hole{h}_class{c}_cluster{v}_results.txt` 和 `.json`。
-- 本征系统：`hole{h}_class{c}_eigvals.npy`、`hole{h}_class{c}_eigvecs.npy`。
-- 派生数据：`_Heff.npy`、`_T11m1.npy`、`_t11_selected_indices.npy`、
-  `_double_occupation_expectation.npy`、`_states.npy`、`_S2_diagonal.npy`。
+- 团簇枚举使用 `ClusterSets(N)`。
+- ED、projection 和 downfolding 只对每个同构 family 的代表元计算一次，
+  family 由 `(hole, class_idx)` 标识。
+- 同一 family 中其他 `cluster_idx` 成员复用代表元的本征系统/projection 数据。
+- fitting 和 reporting 仍可对每个 `cluster_idx` 输出，并使用该 member cluster
+  自己的 operator groups。
+- 除非用户显式禁用代表元复用，workchain 不得对每个同构 member 独立求解。
 
-## 5) 结果输出 (MUST)
-
-MUST:
-- 算符定义、规范排序和输出文件格式（`.txt` 和 `.json`）
-  定义在 `08-OPERATOR_OUTPUT.md` 中。
-
-## 6) 重启协议 (MUST)
+## 5) Workflow 选择 (MUST)
 
 MUST:
-- 当 `restart=True` 时，代码从磁盘读取预计算的本征系统而非重新对角化。
-- 仅重新执行选择 + 降��� + 拟合步骤。
-- 重启目录包含每个团簇的 `_eigvals.npy` 和 `_eigvecs.npy`。
-- `adiabatic` 工作流从**前一**参数点读取本征系统和选定索引，
-  前一参数由 `t_previous = t - delta` 计算。
-- 在绝热扫描的首个参数点，如果前一参数点的绝热结果不存在，
-  则用同参数的基线运行（`workflow=None`）作为绝热初始种子。
+- 规范 workflow key 是 `workflow`。
+- 支持的 workflow 值为 `occ`、`energy`、`greedy`、`greedy_multi` 和 `adiabatic`。
+- 旧名称如 `single`、`multi`、`multi_restart` 和 `adiabatic_restart`
+  仅为 reference-data 名称，不是生产 workflow 值。
+- `adiabatic` 种子由 `DELTA` 定位：在相同 cache/output root 约定下，
+  前一点为 `t_previous = t - DELTA`。
+- adiabatic 种子由前一 block 的本征向量和前一 selected indices 组成。
+  种子必须来自前一点的 projection 输出，而不能只来自 solve cache。
+- 缺少 adiabatic 种子数据是错误。不得回退到同参数 baseline 运行。
 
-## 7) CLI 参数 (MUST)
+## 6) 派生输出归属 (MUST)
 
 MUST:
-- 所有参数通过命令行 `KEY=VALUE` 传递。
+- 派生 projection 输出至少包含 selected indices、逐 block 选择诊断、
+  `H_eff` 和 `T11` 指标。
+- Fit 输出包含 coefficients 和 fit metrics。
+- workchain/result-output 层拥有派生输出的写入职责。
+- `Block` 拥有局部计算和可选 selection JSONL logging，但不拥有持久化结果 schema。
+- 规范 JSON 形状定义在 `08-OPERATOR_OUTPUT.md`。
+
+## 7) 未来 CLI 参数 (MUST)
+
+MUST:
+- CLI 参数一旦重新引入，就通过 `KEY=VALUE` 传递。
 - CLI 键不区分大小写。
-- 关键参数：
+- 规范 key 包括：
   - `N`、`U`、`T`：物理参数。
-  - `MODE`：`full`、`fixed_sz`、`block_sz_full`、`fixed_sz_s2`、`block_sz_s2_full` 之一。
-  - `MODE=all` 作为 `MODE=full` 的输入别名接受。
-  - `twoSz`、`twoS`：固定扇区运行的物理对称性标签。
-    实现可以接受这些键的任意大小写形式。
-  - `workflow`：工作流（`occ`、`energy`、`single`、`multi`、`adiabatic`）。
-    实现可以接受该键的任意大小写形式。
-  - `SELECT`：选择模式（`block` 或默认）。
-  - `RESTART`：`true`/`false`。
-  - `DELTA`：绝热步长。
-  - `NCELL`、`NCUT`：嵌入参数。
-  - `MATCH_SPIN_SECTORS`：`true`/`false`。
-- 标准不允许 `TYPE`、`SZ`、`S`、`S2`、`SZ_IDX` 或 `S_IDX`。
-- `twoSz` 和 `twoS` 必须满足 `00-CONVENTIONS.md` 中定义的物理约束。
+  - `MODE`：五种 public mode 之一。
+  - `twoSz`、`twoS`：`MODE` 需要时的固定扇区标签。
+  - `workflow`：`occ`、`energy`、`greedy`、`greedy_multi`、`adiabatic` 之一。
+  - `CACHE_MODE`：`none`、`load`、`save`、`partial` 之一。
+  - `CACHE_DIR`：solve cache 根目录。
+  - `DELTA`：adiabatic 步长。
+- 标准不允许生产 key `TYPE`、`SZ`、`S`、`S2`、`SZ_IDX`、`S_IDX`、
+  `SELECT` 或 `MATCH_SPIN_SECTORS`。

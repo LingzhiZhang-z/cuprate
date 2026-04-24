@@ -8,7 +8,7 @@ from datetime import datetime
 from math import comb
 
 from cuprate.mpi import comm, rank, size, is_root
-from cuprate.io import (
+from cuprate.back.io import (
     MAIN_CLI_SPEC,
     Params,
     build_path_spec,

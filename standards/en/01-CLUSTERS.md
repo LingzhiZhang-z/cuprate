@@ -80,13 +80,22 @@ Validation:
 ## 6) Bond Generation (MUST)
 
 MUST:
-- `generate_bonds(cluster)` returns a single sublist containing all unique
-  nearest-neighbor pairs `[i, j]` with `adj[i][j] == 1` and `i < j`.
+- `Cluster.bonds` stores all unique nearest-neighbor pairs `(i, j)` with
+  Manhattan distance `1` and `i < j`. This is the bond list used by the Hubbard
+  hopping matrix.
+- `Cluster.generate_bonds(N=2, is_connected=False)` returns fit-operator groups:
+  one singleton group `[[i, j]]` per two-site operator.
+- `Cluster.generate_bonds(N=4 or 6, is_connected=True)` returns singleton
+  groups for connected multi-site spin-operator pairings.
 
 Code form:
 ```python
-bonds = generate_bonds(cluster)
-# bonds[0] = NN pairs
+nn_bonds = cluster.bonds
+bond_groups = (
+    cluster.generate_bonds(N=2, is_connected=False)
+    + cluster.generate_bonds(N=4, is_connected=True)
+    + cluster.generate_bonds(N=6, is_connected=True)
+)
 ```
 
 ## 7) Two-Site Bond Classification (MUST)

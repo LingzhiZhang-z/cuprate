@@ -9,6 +9,8 @@ Core data flow:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from cuprate import ATOL
@@ -17,6 +19,15 @@ from cuprate.states import (
     calc_S_plus_matrix,
     sort_states,
 )
+
+
+@dataclass(frozen=True)
+class S2SectorBlock:
+    twoSz: int
+    twoS: int
+    D: int
+    basis_states: list[int]
+    transform: np.ndarray
 
 
 # ── Small helpers ───────────────────────────────────────────
@@ -114,15 +125,21 @@ def build_S2_sectors(grouped_states, multiplets):
     """Collect all lowered blocks and sort them by (twoSz, twoS, D).
 
     Each item contains:
-      twoSz, twoS, D, states_block, coeff_block
+      S2SectorBlock(twoSz, twoS, D, basis_states, transform)
     """
     sector_blocks = []
     for (twoS, D), multiplet_blocks in multiplets.items():
         for twoSz, coeff_block in multiplet_blocks.items():
             sector_blocks.append(
-                (twoSz, twoS, D, grouped_states[(twoSz, D)], coeff_block)
+                S2SectorBlock(
+                    twoSz=twoSz,
+                    twoS=twoS,
+                    D=D,
+                    basis_states=grouped_states[(twoSz, D)],
+                    transform=coeff_block,
+                )
             )
-    sector_blocks.sort(key=lambda item: (item[0], item[1], item[2]))
+    sector_blocks.sort(key=lambda block: (block.twoSz, block.twoS, block.D))
     return sector_blocks
 
 
@@ -145,9 +162,9 @@ def build_S2_transforms(grouped_states, N, sector_blocks):
         basis_map[twoSz] = {state: idx for idx, state in enumerate(basis[twoSz])}
 
     blocks_by_sector = {}
-    for twoSz, twoS, D, states_block, coeff_block in sector_blocks:
-        blocks_by_sector.setdefault((twoSz, twoS), []).append(
-            (states_block, np.asarray(coeff_block))
+    for block in sector_blocks:
+        blocks_by_sector.setdefault((block.twoSz, block.twoS), []).append(
+            (block.basis_states, np.asarray(block.transform))
         )
 
     transformers = {}
@@ -183,12 +200,12 @@ def write_S2_blocks(filename, sector_blocks, N):
     """
     width = 2 * N
     with open(filename, "w", encoding="ascii") as f:
-        for twoSz, twoS, D, states_block, coeff_block in sector_blocks:
-            coeff_block = np.asarray(coeff_block)
-            nstate = len(states_block)
+        for block in sector_blocks:
+            coeff_block = np.asarray(block.transform)
+            nstate = len(block.basis_states)
             nvec = coeff_block.shape[1]
-            f.write(f"{twoSz} {twoS} {D} {nstate} {nvec}\n")
-            f.write(" ".join(format(int(state), f"0{width}b") for state in states_block) + "\n")
+            f.write(f"{block.twoSz} {block.twoS} {block.D} {nstate} {nvec}\n")
+            f.write(" ".join(format(int(state), f"0{width}b") for state in block.basis_states) + "\n")
             for j in range(nvec):
                 f.write(
                     " ".join(_format_complex(value) for value in coeff_block[:, j])
@@ -212,7 +229,14 @@ def load_S2_blocks(filename):
                     [complex(value) for value in f.readline().split()],
                     dtype=complex,
                 )
-            sector_blocks.append((twoSz, twoS, D, states_block, coeff_block))
+            sector_blocks.append(
+                S2SectorBlock(
+                    twoSz=twoSz,
+                    twoS=twoS,
+                    D=D,
+                    basis_states=states_block,
+                    transform=coeff_block,
+                )
+            )
     return sector_blocks
-
 

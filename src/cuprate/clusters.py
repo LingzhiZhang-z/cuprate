@@ -63,9 +63,9 @@ class Cluster:
     """Single cluster: geometry (sites, bonds) plus enumeration tags (hole, class_idx)."""
     sites: tuple[tuple[int, int], ...]
     bonds: tuple[tuple[int, int], ...]
-    hole: int = None
-    class_idx: int = None
-    cluster_idx: int = None
+    hole: int | None = None
+    class_idx: int | None = None
+    cluster_idx: int | None = None
 
     @property
     def N(self) -> int:
@@ -325,4 +325,3 @@ def classify_two_site_bonds(cluster):
         bond_types.items(),
         key=lambda item: item[0][0] ** 2 + item[0][1] ** 2,
     )
-

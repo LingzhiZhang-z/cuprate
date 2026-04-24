@@ -1,125 +1,88 @@
-# Cuprate Project
+# Agent Instructions
 
-Finite-cluster exact diagonalization of the single-band Hubbard model, with SVD downfolding to effective spin Hamiltonians and linked-cluster expansion (LCE) to the thermodynamic limit.
+## Before modifying code
 
-## Standards
+1. Read the relevant standard in `standards/en/` first.
+2. Follow the naming conventions in `00-CONVENTIONS.md` §6-7. Never introduce forbidden names.
+3. Check `CLAUDE.md` for the code ↔ standards mapping to find the right standard.
 
-Authoritative scientific standards live in `standards/en/`. Code MUST follow these standards.
+## Naming rules (non-negotiable)
 
-| File | Scope |
-|------|-------|
-| `00-CONVENTIONS.md` | Naming conventions (`twoSz`, `twoS`, `S2`), forbidden names, tolerances |
-| `01-CLUSTERS.md` | Square-lattice cluster enumeration, bond classification |
-| `02-HAMILTONIAN.md` | Fock encoding, Hubbard Hamiltonian, diagonalization |
-| `03-SYMMETRY_SECTORS.md` | Sz/S² sector decomposition, five diagonalization modes |
-| `04-DOWNFOLDING.md` | Eigenstate selection, T₁₁ metric, H_eff via SVD, spin-coupling fit |
-| `05-LCE_AND_EMBEDDING.md` | Möbius inversion (LCE), supercell embedding |
-| `06-RUNTIME.md` | CLI parameters, path grammar, I/O layout |
-| `07-TESTING.md` | Regression testing strategy, reference data, naming translation |
-| `08-OPERATOR_OUTPUT.md` | Spin-coupling operators, canonical pairing order, output formats |
+- `twoSz` (not `two_sz`, `sz`, `Sz`)
+- `twoS` (not `two_s`, `s`, `S`)
+- `S2` for S² (not `s_squared`, `ssq`, `SSquared`)
+- Mode strings: `fixed_sz_s2`, `block_sz_s2_full` (not `fixed_sz_ssq`, `block_sz_ssq_full`)
+- Path tokens: `twoSz_<value>`, `twoS_<value>`, negative uses `n` prefix (`twoSz_n1`)
+- CLI: `workflow` (not `TYPE`)
 
-## Naming Conventions
+## Standards structure
 
-Canonical names (from `00-CONVENTIONS.md` §6):
-- `twoSz` = 2Sz (integer), `twoS` = 2S (integer), `S2` = S² = S(S+1)
-- Forbidden: `ssq`, `s_squared`, `two_sz`, `two_s`, `SSquared`
-- Modes: `full`, `fixed_sz`, `block_sz_full`, `fixed_sz_s2`, `block_sz_s2_full`
-- Path tokens: `twoSz_<value>`, `twoS_<value>`, `twoSz_all`, `twoSz_all_twoS_all`
-- Negative path values use `n` prefix: `twoSz_n1` for -1
-- CLI keys are case-insensitive. `TYPE`, `SZ`, `S`, `SZ_IDX`, `S_IDX` are forbidden.
-
-## Code ↔ Standards Mapping
-
-| Code module | Primary standard | Role |
-|-------------|-----------------|------|
-| `clusters.py` | 01-CLUSTERS | Cluster geometry, enumeration, bond classification |
-| `states.py` | 02-HAMILTONIAN §1-7 | Fock-state encoding, basis generation, sorting, and state-space `Sz`/`S2` operators |
-| `hamiltonian.py` | 02-HAMILTONIAN §8-11 | Hamiltonian construction, diagonalization |
-| `sectors.py` | 03-SYMMETRY_SECTORS | Sz/S² blocking and reconstruction |
-| `downfolding.py` | 04-DOWNFOLDING | Selection, SVD, H_eff, spin-coupling fit |
-| `io.py` | 06-RUNTIME | CLI parsing, path construction, file I/O |
-| `hubbard.py` | — | HubbardModel thin coordinator |
-| `main/__main__.py` | — | Main entry point (MPI) |
-| `lce/__main__.py` | 05-LCE_AND_EMBEDDING | LCE subcluster subtraction |
-| `embed/__main__.py` | 05-LCE_AND_EMBEDDING | Supercell embedding |
-
-## Physics Pipeline
-
-### Main line 1: Single-cluster projection
 ```
-Cluster geometry (01) → Fock basis + Hamiltonian (02) → Sz/S² blocking (03) → Select → SVD → H_eff → Spin fit (04)
+00-CONVENTIONS       Naming, tolerances
+01-CLUSTERS          Geometry (independent of physics)
+02-HAMILTONIAN       Fock basis (§1-7) + Hubbard model (§8-11)
+03-SYMMETRY_SECTORS  Sz/S² block diagonalization, five modes
+04-DOWNFOLDING       Selection → T₁₁ → H_eff → spin fit
+05-LCE_AND_EMBEDDING Möbius inversion + supercell embedding contract
+06-RUNTIME           Workchain/cache/output contract
+07-TESTING           Regression/reference-data policy
+08-OPERATOR_OUTPUT   Spin-coupling and projection output schema
 ```
 
-### Main line 2: LCE to thermodynamic limit
-```
-All cluster H_eff results → Möbius inversion → Supercell embedding (05)
-```
+## How to read the code
 
-## How to Read the Code
+- First pass for the single-cluster physics line:
+  `hubbard.py` → `states.py` → `sectors.py` → `manifold.py`
+- Read `hubbard.py` first:
+  it is the active single-cluster coordinator. `HubbardModel` owns basis generation, symmetry blocking, Hamiltonian construction, solving, merging, projection, and fitting state. Its lifecycle is `set_symmetry()` → `build_hamiltonians()` → `solve()` → optional `merge_by_s2()` / `merge_by_sz()` → `project()` → `fit()`.
+- `hubbard.py` owns the public mode aliases and internal `MODE_*` constants. The public canonical modes remain `full`, `fixed_sz`, `block_sz_full`, `fixed_sz_s2`, and `block_sz_s2_full`.
+- Read `states.py`:
+  it defines the Fock basis, sorting, double occupation, state-space `Sz`/`S2` operators, and fermionic signs — the primitives consumed by `hubbard.py`.
+- Read `sectors.py` after that:
+  this is where algebraic `S2` sector blocks (`S2SectorBlock`) and fixed-`twoSz` → `(twoSz,twoS)` transforms live.
+- Read `manifold.py` last in the core line:
+  it holds the `Block` container, per-block selection methods (`occ`, `energy`, `greedy`, `greedy_multi`, `adiabatic`), `Block.downfold`, `Block.t11_norm`, spin-operator construction, and least-squares fit helpers.
+- Treat `mpi.py` as runtime plumbing only.
+- Treat `src/cuprate/back/` as old reference material. It may be useful for physics comparison, but it is not active structure and must not be copied as compatibility scaffolding.
 
-### First pass: single-cluster line
-```
-main/solver.py
-  -> hubbard.py
-     -> states.py
-     -> hamiltonian.py
-     -> sectors.py
-     -> downfolding.py
-```
+## Where the physics core lives
 
-- Start with `main/solver.py` to see the runtime order for one cluster.
-- Then read `hubbard.py` as the coordinator that owns the model state and calls into the real physics modules.
-- Read `states.py` and `hamiltonian.py` together:
-  basis generation/sorting, state-space spin operators, and Hubbard matrix elements are one conceptual unit.
-- Read `sectors.py` next if you care about `Sz` / `S2` blocking, `S2` transforms, or reconstructed full spectra.
-- Read `downfolding.py` after that for the low-energy mapping:
-  state selection, `T11`, `H_eff`, and spin-coupling fitting.
+- `clusters.py`:
+  square-lattice geometry, bond generation, cluster classification.
+- `states.py`:
+  Hubbard basis encoding, ordering, state-space `Sz`/`S2` operators, and the single-state hopping primitive `apply_hop`; pure-spin rows are identified with `pure_spin_state_indices(...)`.
+- `hubbard.py`:
+  the `HubbardModel` single-cluster coordinator; owns the Hubbard Hamiltonian matrix-element methods (`_build_hamiltonian_t`, `_build_hamiltonian_U`, composed as `build_hamiltonian`) and wires basis generation, symmetry blocking, and per-block diagonalisation (`np.linalg.eigh`).
+- `sectors.py`:
+  `Sz` grouping, highest-weight `S2` multiplets, and `Sz -> (Sz,S)` transforms.
+- `manifold.py`:
+  `Block`, eigenstate selection, `T11`, `H_eff`, and spin-operator fitting helpers.
 
-### Second pass: thermodynamic line
-```
-main/workflow.py
-  -> lce/workflow.py + lce/core.py
-  -> embed/workflow.py + embed/core.py + embed/reporting.py
-```
+## Key dataclasses
 
-- `lce/core.py` is the connected-subcluster subtraction logic.
-- `embed/core.py` is the periodic supercell embedding logic.
-- `embed/reporting.py` is presentation/output formatting, not the embedding kernel itself.
+- `Cluster` (in `clusters.py`) — geometry plus enumeration tags (`hole`, `class_idx`, `cluster_idx`); representatives are the first member of each `(hole, class_idx)` family.
+- `S2SectorBlock` (in `sectors.py`) — one algebraic `(twoSz, twoS, D)` transform block used to assemble full `(twoSz, twoS)` transforms.
+- `Block` (in `manifold.py`) — one symmetry block with `basis_states`, optional `ham`, `eigvals`, `eigvecs`, optional `basis_transform`, `twoSz`, and `twoS`; owns `spin_fock_rows`, `spin_sector_columns`, `spin_dim`, `t11_norm`, `selected_*`, `downfold`, and `_spin_operators`.
+- `HubbardModel` (in `hubbard.py`) — the active single-cluster coordinator. It stores solved `blocks` and in-memory projection/fit results (`selected_indices`, `selection_info`, `heff`, `t11m1_norms`, `coupling_coeffs`, `fit_metrics`).
 
-### Files to defer on a first pass
+## Five diagonalization modes
 
-- `io.py`:
-  important for CLI/path rules, but not where the main physics formulas live.
-- `main/workflow.py`, `main/reporting.py`, `mpi.py`:
-  orchestration, persistence, and MPI plumbing.
+| Mode | Blocks before optional merge | Optional reconstruction |
+|------|------------------------------|-------------------------|
+| `full` | One full Fock block | N/A |
+| `fixed_sz` | One fixed-`twoSz` block | No |
+| `block_sz_full` | All fixed-`twoSz` blocks | `merge_by_sz()` |
+| `fixed_sz_s2` | One fixed-`(twoSz,twoS)` block | No |
+| `block_sz_s2_full` | All fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
 
-## Where the Physical Core Lives
+## Do not modify tests without explicit request
 
-| Module | Physical role |
-|--------|---------------|
-| `clusters.py` | Cluster geometry, nearest-neighbor bonds, graph classification |
-| `states.py` | Fock-state encoding, electron counting, double occupation, basis ordering, `Sz`/`S2` state-space operators |
-| `hamiltonian.py` | Hubbard matrix elements and diagonalisation |
-| `sectors.py` | `Sz` sectors, `Sz -> (Sz,S)` transforms, reconstruction |
-| `downfolding.py` | Eigenstate selection, `T11`, `H_eff`, spin-operator fit |
-| `lce/core.py` | LCE / Möbius subtraction of connected subclusters |
-| `embed/core.py` | Embedding LCE couplings into the periodic square supercell |
+Test files under `tests/` are separately maintained. Do not modify them unless the user explicitly asks.
 
-The most important conceptual boundary is:
-- `hubbard.py` coordinates.
-- `states.py`, `hamiltonian.py`, `sectors.py`, and `downfolding.py` implement the core single-cluster physics.
-- `lce/core.py` and `embed/core.py` are the thermodynamic post-processing layer.
+## No Compatibility Layer
 
-## Running
-
-```bash
-mpirun -np N python -m cuprate.main KEY=VALUE ...   # Step 1: diagonalize + fit
-python -m cuprate.lce KEY=VALUE ...                  # Step 2: LCE subtraction
-python -m cuprate.embed KEY=VALUE ...                # Step 3: embed to supercell
-```
-
-## Testing
-
-```bash
-python -m pytest tests/ -x -q
-```
+- Do not add compatibility shims, fallback paths, translation layers, or dual-format support unless the user explicitly asks.
+- Remove obsolete transition code instead of preserving `legacy`, `old`, `deprecated`, or compatibility helpers.
+- Do not keep renamed or superseded interfaces alive alongside the current one.
+- Production code should use the current canonical representation directly, including persisted `_states.npy` output.
+- Old files under `src/cuprate/back/` may be read for reference, but production code must be based on the active modules above.

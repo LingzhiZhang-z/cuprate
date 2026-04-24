@@ -1,6 +1,6 @@
 import pytest
 
-from cuprate.io import parse_main_cli_args
+from cuprate.back.io import parse_main_cli_args
 
 
 def test_parse_fixed_sz_s2_quantum_numbers():

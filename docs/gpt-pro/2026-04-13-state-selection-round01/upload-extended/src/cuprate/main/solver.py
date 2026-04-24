@@ -10,7 +10,7 @@ import numpy as np
 from cuprate import downfolding, sectors
 from cuprate.clusters import build_spin_operator_catalog, generate_bonds
 from cuprate.hubbard import HubbardModel
-from cuprate.io import (
+from cuprate.back.io import (
     MODE_BLOCK_SZ_FULL,
     MODE_FULL,
     PathSpec,

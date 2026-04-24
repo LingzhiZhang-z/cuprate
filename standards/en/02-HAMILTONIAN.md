@@ -163,12 +163,12 @@ Index:
 
 MUST:
 - The production workflow assigns hopping only on nearest-neighbor bonds.
-- The bond list comes from `generate_bonds(cluster)[0]`.
+- The bond list comes from `Cluster.bonds`.
 
 Code form:
 ```python
-nn_bonds = generate_bonds(cluster)[0]
-model.add_hopping_bonds(nn_bonds, params.t)
+model = HubbardModel(cluster, U, t)
+# model.bonds is initialized from cluster.bonds
 ```
 
 ## 10) Hamiltonian Matrix Elements (MUST)

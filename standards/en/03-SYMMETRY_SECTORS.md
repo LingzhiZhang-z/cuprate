@@ -7,7 +7,7 @@ $S_z$ blocking, fixed-$S_z$ diagonalisation of $S^2$, and optional spectrum reco
 MUST:
 - At half filling on $N$ sites, $S_z$ takes values from $-N/2$ to $N/2$ in integer steps
   (half-integer steps if $N$ is odd).
-- Only non-negative $S_z$ values are computed; negative sectors are obtained by spin-flip symmetry.
+- All valid `twoSz` sectors are built directly when an all-`Sz` mode is requested.
 - Each $S_z$ sector has dimension $\binom{N}{N_\uparrow} \cdot \binom{N}{N_\downarrow}$
   where $N_\uparrow = N/2 + S_z$, $N_\downarrow = N/2 - S_z$.
 - Runtime inputs and path names use the canonical integer labels `twoSz = 2 S_z`
@@ -15,8 +15,8 @@ MUST:
 
 Code form:
 ```python
-twoSz_list = nonneg_twoSz_values(N)  # [0, 2, ..., N] or [1, 3, ..., N]
-sz_states[idx] = generate_states(N, N, twoSz=twoSz)
+twoSz_values = range(-N, N + 1, 2)
+states = generate_states(N, N, twoSz=twoSz)
 ```
 
 ## 2) `fourS2 = 4 S^2` Matrix in Fock Basis (MUST)
@@ -53,15 +53,15 @@ MUST:
   `S_minus` inside the same `D` block with the standard SU(2) lowering coefficient.
 - For each `(twoSz, twoS)` sector, columns from different `D` blocks are concatenated in
   ascending `D`, so the `D=0` pure-spin columns appear first.
-- The implementation returns explicit $(twoSz, twoS)$ sector metadata, per-sector transforms,
-  explicit double-occupation eigenvalues for each sector column, and the pure-spin dimension
-  for each sector.
+- The implementation returns explicit `S2SectorBlock` records. Each record is one
+  `(twoSz, twoS, D)` transform block and contains the fixed-`D` basis states plus
+  the transform columns for that block.
 
 Code form:
 ```python
-sector_list, transforms, double_occ_eigvals, dimspin = build_S2_sectors(
-    twoSz_list, sz_states, N
-)
+grouped_states = group_states(generate_states(N, N), N)
+_hw, multiplets = build_S2_multiplets(grouped_states, N)
+sector_blocks = build_S2_sectors(grouped_states, multiplets)
 ```
 
 Validation:
@@ -77,24 +77,25 @@ MUST:
 
 Code form:
 ```python
-sector_list, transforms, dimspin = build_S2_sectors(twoSz_list, sz_states, N)
-for idx, (_twoSz, _twoS, sz_sector_index) in enumerate(sector_list):
-    U = transforms[idx]
-    H_S2[idx] = U.conj().T @ H_Sz[sz_sector_index] @ U
+transforms = build_S2_transforms(grouped_states, N, sector_blocks)
+U = transforms[(twoSz, twoS)]
+H_S2 = U.conj().T @ H_Sz @ U
 ```
 
 ## 5) Full Spectrum Reconstruction (MUST)
 
 MUST:
-- In `block_sz_full` or `block_sz_s2_full` modes, sector eigensystems are assembled into the full spectrum.
-- For $S_z > 0$, the negative-$S_z$ sector is obtained by spin-flip:
-  $|s'\rangle = $ flip all singly-occupied spins, eigenvectors pick up sign $(-1)^D$ per basis state.
-- Global indices track which column of the reconstructed eigenvector matrix belongs to which sector block.
+- Sector eigensystems stay as `Block` objects until the caller explicitly merges them.
+- `HubbardModel.merge_by_s2()` merges all `twoS` sectors with the same `twoSz`
+  by building block-diagonal sector matrices and transforming them back to the
+  fixed-`twoSz` Fock basis.
+- `HubbardModel.merge_by_sz()` merges all fixed-`twoSz` Fock-coordinate blocks
+  into one full Fock-coordinate block.
 
 Code form:
 ```python
-reconstruct_from_sz(...)  # for block_sz_full
-reconstruct_from_S2(...)  # for block_sz_s2_full
+model.merge_by_s2()  # block_sz_s2_full -> block_sz_full frame
+model.merge_by_sz()  # block_sz_full -> full frame
 ```
 
 Validation:
@@ -105,19 +106,19 @@ Validation:
 MUST:
 - The code supports exactly five modes:
 
-| Mode | Blocks | Reconstruct | Spin couplings |
-|------|--------|-------------|----------------|
-| `full` | None | N/A | Yes |
-| `fixed_sz` | Single $S_z$ | No | Yes |
-| `block_sz_full` | All $S_z$ | Yes | Yes |
-| `fixed_sz_s2` | Single $(S_z, S)$ | No | No (projection analysis only) |
-| `block_sz_s2_full` | All $(S_z, S)$ | Yes | Yes |
+| Mode | Blocks before optional merge | Optional reconstruction |
+|------|------------------------------|-------------------------|
+| `full` | one full Fock block | N/A |
+| `fixed_sz` | one fixed-`twoSz` block | No |
+| `block_sz_full` | all fixed-`twoSz` blocks | `merge_by_sz()` |
+| `fixed_sz_s2` | one fixed-`(twoSz,twoS)` block | No |
+| `block_sz_s2_full` | all fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
 
-- `fixed_sz_s2` does NOT produce spin couplings because a single total-spin sector
-  does not determine unique SU(2)-invariant couplings. It reports projection diagnostics only.
+- Projection and spin fitting are per current `Block` frame. They are not
+  prohibited by `fixed_sz_s2`; the caller is responsible for choosing the block
+  frame whose fitted operators answer the intended physics question.
 
 Code form:
 ```python
-ModeSpec = resolve_mode_spec(params)
-# ModeSpec.result_kind == "projection_analysis" only for fixed_sz_s2
+model.set_symmetry(mode, twoSz=twoSz, twoS=twoS)
 ```

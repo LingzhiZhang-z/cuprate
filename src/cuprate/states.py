@@ -23,8 +23,14 @@ Code-level consequences:
 from __future__ import annotations
 
 import itertools
+from functools import reduce
+from operator import matmul
 
 import numpy as np
+
+
+# site_code 1 = up (Sz=+1/2), 2 = down (Sz=-1/2) on a D=0 site
+_SZ = {1: 0.5, 2: -0.5}
 
 
 def up_mask(N: int) -> int:
@@ -70,6 +76,24 @@ def set_site(state: int, i: int, code: int) -> int:
 
 def sign_below(state: int, bit_idx: int) -> int:
     return 1 if (state & ((1 << bit_idx) - 1)).bit_count() % 2 == 0 else -1
+
+
+def apply_hop(state: int, src: int, dst: int, spin: str) -> tuple[int | None, int]:
+    """Apply c†_{dst,σ} c_{src,σ} to `state`; return (new_state, sign) or (None, 0)."""
+    offset = 0 if spin == "up" else 1
+    src_bit = 2 * src + offset
+    dst_bit = 2 * dst + offset
+
+    if not (state >> src_bit) & 1:
+        return None, 0
+    if (state >> dst_bit) & 1:
+        return None, 0
+
+    sign = sign_below(state, src_bit)
+    new_state = state ^ (1 << src_bit)
+    sign *= sign_below(new_state, dst_bit)
+    new_state ^= 1 << dst_bit
+    return new_state, sign
 
 
 def _calc_site_S_plus_state(state: int, i: int) -> int | None:
@@ -171,6 +195,29 @@ def calc_fourS2_matrix(states: list[int], N: int) -> np.ndarray:
 
 def calc_fourS2(state: int, N: int) -> int:
     return _calc_diagonal_fourS2_element(state, N)
+
+
+def _spin_pair(states: list[int], i: int, j: int) -> np.ndarray:
+    """S_i · S_j on the singly occupied (D=0) Fock basis `states`."""
+    dim = len(states)
+    index = {state: idx for idx, state in enumerate(states)}
+    matrix = np.zeros((dim, dim), dtype=complex)
+
+    for idx, state in enumerate(states):
+        code_i = site_code(state, i)
+        code_j = site_code(state, j)
+        matrix[idx, idx] = _SZ[code_i] * _SZ[code_j]
+        if code_i == 2 and code_j == 1:
+            matrix[index[set_site(set_site(state, i, 1), j, 2)], idx] = 0.5
+        elif code_i == 1 and code_j == 2:
+            matrix[index[set_site(set_site(state, i, 2), j, 1)], idx] = 0.5
+    return matrix
+
+
+def spin_matrix(states: list[int], bond) -> np.ndarray:
+    """Product of S·S pair operators over consecutive site pairs in `bond`."""
+    pairs = zip(bond[::2], bond[1::2])
+    return reduce(matmul, (_spin_pair(states, i, j) for i, j in pairs))
 
 
 def sort_states(state_list: list[int], N: int) -> list[int]:

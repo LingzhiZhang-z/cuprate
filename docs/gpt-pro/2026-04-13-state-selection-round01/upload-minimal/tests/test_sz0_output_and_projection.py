@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 
 from cuprate.clusters import Clusters_Square
-from cuprate.io import Params, PathSpec, resolve_mode_spec
-from cuprate.main import cluster_process_work_item
+from cuprate.back.io import Params, PathSpec, resolve_mode_spec
+from cuprate.back.main import cluster_process_work_item
 
 
 def _make_projection_run(tmp_path: Path):

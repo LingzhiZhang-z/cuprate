@@ -9,7 +9,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cuprate.hubbard import HubbardModel
-from cuprate.io import Params, resolve_mode_spec
+from cuprate.back.io import Params, resolve_mode_spec
 from cuprate import sectors
 
 

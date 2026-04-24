@@ -1,98 +1,127 @@
 # 06-RUNTIME
 
-MPI work distribution, I/O conventions, and path layout.
+Active workchain, cache, and I/O contract for the current `HubbardModel` +
+`Block` core.
 
-## 1) MPI Execution Model (MUST)
+## 1) Active Runtime Boundary (MUST)
 
 MUST:
-- The code uses `mpi4py` with `MPI.COMM_WORLD`.
-- Rank 0 is root for broadcasting and printing.
-- Work distribution: round-robin with extra tasks assigned to later ranks.
+- The current active source tree has no production `cuprate.main`,
+  `cuprate.lce`, or `cuprate.embed` entry point.
+- Runtime code must be rebuilt on top of the active modules:
+  `clusters.py`, `states.py`, `sectors.py`, `manifold.py`, `hubbard.py`, and
+  `mpi.py`.
+- `src/cuprate/back/` is reference material only. Do not add compatibility
+  paths that execute or preserve the old workchain structure.
+
+## 2) Single-Cluster Lifecycle (MUST)
+
+MUST:
+- A single-cluster calculation follows this staged lifecycle:
 
 Code form:
 ```python
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-size = comm.Get_size()
-# distribute_work: items_per_rank = total // size, remainder to last ranks
+model = HubbardModel(cluster, U, t)
+model.set_symmetry(mode, twoSz=twoSz, twoS=twoS)
+model.build_hamiltonians()
+model.solve(cache_mode=cache_mode, cache_dir=cache_dir)
+model.project(method=workflow, **select_kwargs)
+model.fit(bond_groups=bond_groups)
 ```
 
-## 2) Execution Pipeline (MUST)
+- Optional reconstruction is explicit:
+
+Code form:
+```python
+model.merge_by_s2()  # merge twoS sectors inside each twoSz
+model.merge_by_sz()  # merge fixed-twoSz blocks into one full block
+```
+
+- Public canonical modes are `full`, `fixed_sz`, `block_sz_full`,
+  `fixed_sz_s2`, and `block_sz_s2_full`.
+- Internal mode constants and cache buckets are owned by `hubbard.py`.
+
+## 3) Eigensystem Cache (MUST)
 
 MUST:
-- The three entry points execute in sequence (not in the same process):
-  1. `python -m cuprate.main` — cluster enumeration, Hamiltonian solve, selection, downfolding, fit.
-  2. `python -m cuprate.lce` — reads results from step 1, performs subcluster subtraction.
-  3. `python -m cuprate.embed` — reads results from step 2, embeds into supercell.
-- Only `cuprate.main` uses MPI. LCE and embed are single-process.
+- The solve cache stores only solved blocks: basis states, eigenvalues,
+  eigenvectors, Hamiltonian, and optional `basis_transform`.
+- The solve cache does not store selected indices, `H_eff`, `T11`, or fit
+  results.
+- `HubbardModel.solve()` supports exactly four cache modes:
 
-## 3) Directory Layout (MUST)
+| cache_mode | Behavior |
+|------------|----------|
+| `none` | Solve every current block in memory; no disk cache |
+| `load` | Load every current block from disk; fail if any block is missing |
+| `save` | Solve every current block, then save every block |
+| `partial` | Load existing blocks and solve/save missing blocks |
 
-MUST:
-- `cuprate.main` writes to:
-  ```
-  ./Block/{base_dir}/{run_dir}/
-  ```
-  where `base_dir = U{U:.4f}_t{t:.4f}`
-  and `run_dir` follows the canonical grammar
-  ```
-  N{N}[ _twoSz_<value> | _twoSz_all ][ _twoS_<value> | _twoS_all ][_match_spin_sectors][_{workflow}][_restart]
-  ```
-  with these mode-specific cases:
-  - `full` -> `N{N}`
-  - `fixed_sz` -> `N{N}_twoSz_<value>`
-  - `fixed_sz_s2` -> `N{N}_twoSz_<value>_twoS_<value>`
-  - `block_sz_full` -> `N{N}_twoSz_all`
-  - `block_sz_s2_full` -> `N{N}_twoSz_all_twoS_all`
-- `all` and `n` are the only non-numeric tokens permitted in `twoSz` / `twoS` path slots.
-- Negative fixed values use `n` as the minus sign, e.g. `twoSz_n1` for $2S_z = -1$.
+- `cache_dir` is required for `load`, `save`, and `partial`, and forbidden for
+  `none`.
+- `HubbardModel.save(cache_dir)` and `Block.save(cache)` must write the same
+  solved block format.
 
-- `cuprate.lce` reads from `Block/{base_dir}/` and writes to `data_transfer/LCE/LCE_{base_dir}/`.
+Code form:
+```python
+cache = Path(cache_dir) / model.label() / cluster.label() / model._bucket
+block.save(cache)
+block = Block.load(cache, twoSz, twoS)
+```
 
-- `cuprate.embed` reads from `data_transfer/LCE/LCE_{base_dir}/` and writes to `data_transfer/Embed/Embed_{base_dir}/`.
-
-## 4) File Naming (MUST)
+## 4) Workchain Computation Model (MUST)
 
 MUST:
-- Per-cluster results: `hole{h}_class{c}_cluster{v}_results.txt` and `.json`.
-- Eigensystem: `hole{h}_class{c}_eigvals.npy`, `hole{h}_class{c}_eigvecs.npy`.
-- Derived data: `_Heff.npy`, `_T11m1.npy`, `_t11_selected_indices.npy`,
-  `_double_occupation_expectation.npy`, `_states.npy`, `_S2_diagonal.npy`.
+- Cluster enumeration uses `ClusterSets(N)`.
+- ED, projection, and downfolding are computed once per isomorphic family
+  representative, identified by `(hole, class_idx)`.
+- Other `cluster_idx` members in the same family reuse the representative
+  eigensystem/projection data.
+- Fitting and reporting may still be emitted for every `cluster_idx`, using the
+  member cluster's own operator groups.
+- The workchain must not solve every isomorphic member independently unless the
+  user explicitly disables representative reuse.
 
-## 5) Result Output (MUST)
-
-MUST:
-- Operator definitions, canonical ordering, and output file formats (`.txt` and `.json`)
-  are defined in `08-OPERATOR_OUTPUT.md`.
-
-## 6) Restart Protocol (MUST)
-
-MUST:
-- When `restart=True`, the code reads precomputed eigensystems from disk instead of rediagonalising.
-- Only the selection + downfolding + fit steps are re-executed.
-- The restart directory contains `_eigvals.npy` and `_eigvecs.npy` for each cluster.
-- The `adiabatic` workflow reads eigensystems and selected indices from the **previous** parameter point,
-  computed from `t_previous = t - delta`.
-- At the first adiabatic point of a sweep, if the previous-point adiabatic result is absent,
-  the code seeds adiabatic selection from the same-parameter baseline run (`workflow=None`).
-
-## 7) CLI Parameters (MUST)
+## 5) Workflow Selection (MUST)
 
 MUST:
-- All parameters are passed as `KEY=VALUE` on the command line.
+- The canonical workflow key is `workflow`.
+- Supported workflow values are `occ`, `energy`, `greedy`, `greedy_multi`, and
+  `adiabatic`.
+- Old names such as `single`, `multi`, `multi_restart`, and
+  `adiabatic_restart` are reference-data names only and are not production
+  workflow values.
+- `adiabatic` seeds are located from `DELTA`: the previous point is
+  `t_previous = t - DELTA` under the same cache/output root convention.
+- The adiabatic seed consists of previous block eigenvectors and previous
+  selected indices. The seed must come from the previous point's projection
+  output, not from the solve cache alone.
+- Missing adiabatic seed data is an error. Do not fall back to a baseline
+  same-parameter run.
+
+## 6) Derived Output Ownership (MUST)
+
+MUST:
+- Derived projection output includes at least selected indices, per-block
+  selection diagnostics, `H_eff`, and `T11` metrics.
+- Fit output includes coefficients and fit metrics.
+- The workchain/result-output layer owns writing derived outputs.
+- `Block` owns local computation and optional selection JSONL logging, but not
+  the durable result schema.
+- The canonical JSON shape is defined in `08-OPERATOR_OUTPUT.md`.
+
+## 7) Future CLI Parameters (MUST)
+
+MUST:
+- CLI parameters, once reintroduced, are passed as `KEY=VALUE`.
 - CLI keys are case-insensitive.
-- Key parameters:
+- Canonical keys include:
   - `N`, `U`, `T`: physical parameters.
-  - `MODE`: one of `full`, `fixed_sz`, `block_sz_full`, `fixed_sz_s2`, `block_sz_s2_full`.
-  - `MODE=all` is accepted as an input alias for `MODE=full`.
-  - `twoSz`, `twoS`: physical symmetry labels for fixed-sector runs.
-    The implementation may accept any capitalization of these keys.
-  - `workflow`: workflow (`occ`, `energy`, `single`, `multi`, `adiabatic`).
-    The implementation may accept any capitalization of this key.
-  - `SELECT`: selection mode (`block` or default).
-  - `RESTART`: `true`/`false`.
+  - `MODE`: one of the five public modes.
+  - `twoSz`, `twoS`: fixed-sector labels when required by `MODE`.
+  - `workflow`: one of `occ`, `energy`, `greedy`, `greedy_multi`, `adiabatic`.
+  - `CACHE_MODE`: one of `none`, `load`, `save`, `partial`.
+  - `CACHE_DIR`: root directory for the solve cache.
   - `DELTA`: adiabatic step size.
-  - `NCELL`, `NCUT`: embedding parameters.
-  - `MATCH_SPIN_SECTORS`: `true`/`false`.
-- The standard does not permit `TYPE`, `SZ`, `S`, `S2`, `SZ_IDX`, or `S_IDX`.
-- `twoSz` and `twoS` must satisfy the physical constraints defined in `00-CONVENTIONS.md`.
+- The standard does not permit production keys `TYPE`, `SZ`, `S`, `S2`,
+  `SZ_IDX`, `S_IDX`, `SELECT`, or `MATCH_SPIN_SECTORS`.

@@ -1,3 +1,1 @@
-"""Main runtime package."""
-
-__all__: list[str] = []
+"""Command-line entry package for the cuprate main workchain."""

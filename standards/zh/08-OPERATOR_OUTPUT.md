@@ -131,20 +131,38 @@ MUST:
 ## 6) 机器可读输出 (MUST)
 
 MUST:
+- 逐团簇 sidecar JSON 文件写为 `hole{h}_class{c}_cluster{v}_results.json`。
+  每个 sidecar 包含与汇总结果中对应 entry 相同的 payload 形状。
 - 文件名：运行输出目录中的 `results.json`。
 - 包含该运行所有团簇的结果，汇总在单个文件中。
+- `projection` 对 spin-coupling 结果是必需的，因为它是 selected eigenstate
+  indices 和逐 block projection diagnostics 的持久位置。
 - 结构：
   ```json
   {
     "schema_version": 2,
     "result_kind": "spin_couplings",
-    "run_params": {"U": 1.0, "t": 0.24, "N": 4, "MODE": "full"},
+    "run_params": {"U": 1.0, "t": 0.24, "N": 4, "MODE": "full", "workflow": "greedy"},
     "clusters": [
       {
         "hole": 0,
         "class_idx": 0,
         "cluster_idx": 0,
         "sites": [[0,0], [1,0], [0,1], [1,1]],
+        "projection": {
+          "method": "greedy",
+          "blocks": [
+            {
+              "block": "twoSz_all_twoS_all",
+              "twoSz": null,
+              "twoS": null,
+              "selected_indices": [0, 1, 2, 3],
+              "t11_minus_1_norm": 0.0,
+              "overlap": null,
+              "selection_info": {}
+            }
+          ]
+        },
         "operators": {
           "constant_term": {"real": ..., "imag": ...},
           "groups": [...]
@@ -177,6 +195,10 @@ MUST:
   §1 中的前缀约定（`K1`、`K2`、...；`L1`、`L2`、...）。
 - 每个团簇的元数据（`rank`、`computation_time_s`）放在 `metadata` 子对象中，
   不混入顶层。
-- `projection_analysis` 结果遵循相同的汇总结构，用 `projection` 代替
-  `operators` + `fit`。
-- LCE 和 embed 从此汇总 JSON 读取，而非从文本文件。
+- `projection.blocks` 中的每个条目记录该 block 已求解本征向量框架中的
+  selected eigenvector column indices。
+- `selection_info` 存储方法特定诊断。它可以包含 `greedy_multi` 的紧凑摘要字段；
+  详细 trial logs 也可以由 selector 写成 JSONL，但最终 `results.json` 是持久输出。
+- `projection_analysis` 结果使用同样的汇总结构，包含 `projection`，
+  但不包含 `operators` 或 `fit`。
+- 未来 LCE/embed workchains 必须从这个汇总 JSON 读取，而不是从文本文件读取。

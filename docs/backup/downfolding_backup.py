@@ -13,7 +13,7 @@ import time
 import numpy as np
 
 from cuprate import ATOL
-from cuprate.io import Params, block_root_dir, build_run_dirnames
+from cuprate.back.io import Params, block_root_dir, build_run_dirnames
 from cuprate.mpi import rank
 from cuprate.states import calc_double_occupation_matrix, set_site, site_code
 

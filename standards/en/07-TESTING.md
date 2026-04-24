@@ -55,6 +55,8 @@ MUST:
 MUST:
 - The test framework must translate between old and new naming conventions.
   The reference data retains old names; comparison code maps them to current semantics.
+- Production code must not accept old names just because the test-side
+  translator can read them.
 
 ### 3.1) Directory names
 
@@ -63,9 +65,9 @@ MUST:
 | `Block_U{U}_t{t}` | `U{U}_t{t}` | Strip `Block_` prefix |
 | `N{N}` | `N{N}` (MODE=full) | No change |
 | `N{N}_sz{Sz:.4f}` | `N{N}_twoSz_{twoSz}` | `twoSz = int(2 * Sz)` |
-| `N{N}_multi_restart` | `N{N}_multi_restart` | Workflow suffix unchanged |
-| `N{N}_adiabatic_restart` | `N{N}_adiabatic_restart` | Workflow suffix unchanged |
-| `N{N}_sz{Sz}_multi_restart` | `N{N}_twoSz_{twoSz}_multi_restart` | Combine Sz translation + suffix |
+| `N{N}_multi_restart` | workflow `greedy_multi` reference case | Old data name only |
+| `N{N}_adiabatic_restart` | workflow `adiabatic` reference case | Old data name only |
+| `N{N}_sz{Sz}_multi_restart` | `twoSz = int(2 * Sz)`, workflow `greedy_multi` | Old data name only |
 
 ### 3.2) File names
 
@@ -82,7 +84,8 @@ MUST:
 | `TYPE` | `MODE` | `TYPE=all` → `MODE=full`, `TYPE=sz` → `MODE=fixed_sz` |
 | `SZ` | `twoSz` | `twoSz = int(2 * SZ)` |
 | `S` | `twoS` | `twoS = int(2 * S)` |
-| `WORKFLOW` | `workflow` | Case change only |
+| `WORKFLOW=multi` | `workflow=greedy_multi` | Test-side translation only |
+| `WORKFLOW=adiabatic` | `workflow=adiabatic` | Test-side translation only |
 
 Code form:
 ```python
@@ -115,7 +118,7 @@ MUST:
 
 | Quantity | File | Condition | Notes |
 |----------|------|-----------|-------|
-| Selected indices | `t11_selected_indices.npy` | Only compare for `occ` / `energy` workflows | Greedy/multi/adiabatic involve randomness |
+| Selected indices | `t11_selected_indices.npy` | Only compare exactly for `occ` / `energy` workflows | `greedy_multi` and `adiabatic` may choose different valid manifolds |
 | H_eff | `Heff.npy` | Only when selected indices match | H_eff is deterministic given same selection |
 | T11-I | `T11m1.npy` | Only when selected indices match | Same as above |
 | Selected occupation | `t11_selected_occupation.npy` | Only when selected indices match | Derived from selection |
@@ -124,7 +127,7 @@ MUST:
 
 | Quantity | Comparison | Notes |
 |----------|------------|-------|
-| H_eff from `multi` workflow | `‖T11-I‖` should be ≤ old value + `ATOL["loose"]` | Random restarts may find different minima |
+| H_eff from old `multi` / new `greedy_multi` workflow | `‖T11-I‖` should be ≤ old value + `ATOL["loose"]` | Random trials may find different minima |
 | Adiabatic overlap | Should be ≥ old value - `ATOL["loose"]` | May differ due to different selection |
 
 ## 5) Test Case Selection (MUST)

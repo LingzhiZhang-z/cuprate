@@ -45,7 +45,7 @@ def _selected_spin_sector_counts(model) -> Counter:
 
 
 def _make_selected_model(mode: str):
-    from cuprate.io import Params
+    from cuprate.back.io import Params
     params = Params(N=4, U=1.0, t=1.0, mode=mode, match_spin_sectors=True)
     model, _ = make_chain_model(4, 1.0, 1.0, mode, match_spin_sectors=True)
     model.calc_S2()

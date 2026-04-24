@@ -79,13 +79,21 @@ Validation:
 ## 6) 键生成 (MUST)
 
 MUST:
-- `generate_bonds(cluster)` 返回单个子列表，
-  其中包含所有满足 `adj[i][j] == 1` 且 `i < j` 的最近邻格点对 `[i, j]`。
+- `Cluster.bonds` 存储所有唯一最近邻格点对 `(i, j)`，
+  Manhattan 距离为 `1` 且 `i < j`。这是 Hubbard 跳跃矩阵使用的键列表。
+- `Cluster.generate_bonds(N=2, is_connected=False)` 返回拟合算符组：
+  每个两格点算符对应一个单元素组 `[[i, j]]`。
+- `Cluster.generate_bonds(N=4 or 6, is_connected=True)` 返回连通多格点
+  自旋算符配对的单元素组。
 
 Code form:
 ```python
-bonds = generate_bonds(cluster)
-# bonds[0] = NN 对
+nn_bonds = cluster.bonds
+bond_groups = (
+    cluster.generate_bonds(N=2, is_connected=False)
+    + cluster.generate_bonds(N=4, is_connected=True)
+    + cluster.generate_bonds(N=6, is_connected=True)
+)
 ```
 
 ## 7) 两格点键分类 (MUST)

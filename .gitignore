@@ -3,3 +3,11 @@ __pycache__/
 *.pyc
 *.egg-info/
 S2/
+.DS_Store
+.vscode/
+tmp/
+Block/
+data_transfer/
+data_test/
+docs/pdf/
+src/cuprate/back/

@@ -55,6 +55,7 @@ MUST:
 MUST:
 - 测试框架必须在新旧命名约定之间转换。
   参考数据保留旧名称；比较代码将其映射到当前语义。
+- 生产代码不得因为测试侧 translator 能读取旧名称，就接受旧名称。
 
 ### 3.1) 目录名
 
@@ -63,9 +64,9 @@ MUST:
 | `Block_U{U}_t{t}` | `U{U}_t{t}` | 去掉 `Block_` 前缀 |
 | `N{N}` | `N{N}` (MODE=full) | 不变 |
 | `N{N}_sz{Sz:.4f}` | `N{N}_twoSz_{twoSz}` | `twoSz = int(2 * Sz)` |
-| `N{N}_multi_restart` | `N{N}_multi_restart` | 工作流后缀不变 |
-| `N{N}_adiabatic_restart` | `N{N}_adiabatic_restart` | 工作流后缀不变 |
-| `N{N}_sz{Sz}_multi_restart` | `N{N}_twoSz_{twoSz}_multi_restart` | Sz 转换 + 后缀 |
+| `N{N}_multi_restart` | workflow `greedy_multi` 参考用例 | 仅为旧数据名称 |
+| `N{N}_adiabatic_restart` | workflow `adiabatic` 参考用例 | 仅为旧数据名称 |
+| `N{N}_sz{Sz}_multi_restart` | `twoSz = int(2 * Sz)`，workflow `greedy_multi` | 仅为旧数据名称 |
 
 ### 3.2) 文件名
 
@@ -82,7 +83,8 @@ MUST:
 | `TYPE` | `MODE` | `TYPE=all` → `MODE=full`，`TYPE=sz` → `MODE=fixed_sz` |
 | `SZ` | `twoSz` | `twoSz = int(2 * SZ)` |
 | `S` | `twoS` | `twoS = int(2 * S)` |
-| `WORKFLOW` | `workflow` | 仅大小写变化 |
+| `WORKFLOW=multi` | `workflow=greedy_multi` | 仅测试侧转换 |
+| `WORKFLOW=adiabatic` | `workflow=adiabatic` | 仅测试侧转换 |
 
 Code form:
 ```python
@@ -115,7 +117,7 @@ MUST:
 
 | 物理量 | 文件 | 条件 | 说明 |
 |--------|------|------|------|
-| 选定索引 | `t11_selected_indices.npy` | 仅比较 `occ` / `energy` 工作流 | greedy/multi/adiabatic 含随机性 |
+| 选定索引 | `t11_selected_indices.npy` | 仅对 `occ` / `energy` 工作流做精确比较 | `greedy_multi` 和 `adiabatic` 可能选择不同但有效的流形 |
 | H_eff | `Heff.npy` | 仅当选定索引匹配时 | 给定相同选择，H_eff 确定 |
 | T11-I | `T11m1.npy` | 仅当选定索引匹配时 | 同上 |
 | 选定占据 | `t11_selected_occupation.npy` | 仅当选定索引匹配时 | 由选择导出 |
@@ -124,7 +126,7 @@ MUST:
 
 | 物理量 | 比较方式 | 说明 |
 |--------|----------|------|
-| `multi` 工作流的 H_eff | `‖T11-I‖` 应 ≤ 旧值 + `ATOL["loose"]` | 随机重启可能找到不同最小值 |
+| 旧 `multi` / 新 `greedy_multi` 工作流的 H_eff | `‖T11-I‖` 应 ≤ 旧值 + `ATOL["loose"]` | 随机 trials 可能找到不同最小值 |
 | 绝热重叠 | 应 ≥ 旧值 - `ATOL["loose"]` | 不同选择可能导致差异 |
 
 ## 5) 测试用例选择 (MUST)

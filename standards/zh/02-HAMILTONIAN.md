@@ -164,12 +164,12 @@ Index:
 
 MUST:
 - 生产工作流只在最近邻键上赋予跳跃。
-- 键列表来自 `generate_bonds(cluster)[0]`。
+- 键列表来自 `Cluster.bonds`。
 
 Code form:
 ```python
-nn_bonds = generate_bonds(cluster)[0]
-model.add_hopping_bonds(nn_bonds, params.t)
+model = HubbardModel(cluster, U, t)
+# model.bonds 从 cluster.bonds 初始化
 ```
 
 ## 10) 哈密顿量矩阵元 (MUST)
