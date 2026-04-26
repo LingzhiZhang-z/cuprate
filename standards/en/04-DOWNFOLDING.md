@@ -61,8 +61,9 @@ MUST:
 - `greedy_multi` may write one JSONL record per block/trial through
   `selection_info_path` or `info_callback`.
 - `adiabatic` requires explicit `eigvecs_previous` and `selected_previous`
-  arrays for the same block frame. Loading those arrays from a previous
-  parameter point is a workchain responsibility, not a `Block` responsibility.
+  arrays for the same block frame. Loading those arrays from the explicit
+  `SEED_RESULTS` projection artifact is a workchain responsibility, not a
+  `Block` responsibility.
 - If an adiabatic seed is absent, the workchain must fail directly unless the
   user requested another selection method. It must not silently fall back to a
   baseline run.

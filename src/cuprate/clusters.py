@@ -6,6 +6,8 @@ from typing import Sequence
 
 import networkx as nx
 
+from cuprate.paths import cluster_token
+
 POINT_GROUP_OPERATIONS = (
     "id",
     "rot90",
@@ -23,10 +25,11 @@ def get_neighbors(pos):
     return [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
 
 
-def _is_connected(sites, indices):
+def is_connected_subset(sites: Sequence[Sequence[int]], indices: Sequence[int]) -> bool:
     """True if sites[i] for i in indices form a connected NN subset."""
-    subset = {sites[i] for i in indices}
-    start = sites[indices[0]]
+    site_coords = [tuple(map(int, site)) for site in sites]
+    subset = {site_coords[i] for i in indices}
+    start = site_coords[indices[0]]
     visited = {start}
     stack = [start]
     while stack:
@@ -36,6 +39,21 @@ def _is_connected(sites, indices):
                 visited.add(neighbor)
                 stack.append(neighbor)
     return len(visited) == len(indices)
+
+
+def connected_subsets(
+    sites: Sequence[Sequence[int]],
+    *,
+    min_size: int,
+    max_size: int,
+) -> list[tuple[int, ...]]:
+    """Connected site-index subsets under square-lattice NN adjacency."""
+    subsets = []
+    for size in range(min_size, max_size + 1):
+        for subset in combinations(range(len(sites)), size):
+            if is_connected_subset(sites, subset):
+                subsets.append(tuple(int(site) for site in subset))
+    return subsets
 
 
 def _perfect_matchings(items):
@@ -52,10 +70,7 @@ def _perfect_matchings(items):
 
 
 def cluster_label(hole: int, class_idx: int, cluster_idx: int | None = None) -> str:
-    label = f"hole{hole}_class{class_idx}"
-    if cluster_idx is not None:
-        label += f"_idx{cluster_idx}"
-    return label
+    return cluster_token(hole, class_idx, cluster_idx)
 
 
 @dataclass(frozen=True)
@@ -75,15 +90,15 @@ class Cluster:
         return cluster_label(self.hole, self.class_idx, self.cluster_idx)
 
     def generate_bonds(self, N: int, is_connected: bool) -> list[list[Sequence[int]]]:
-        """Bond groups of N-site operators. One singleton group per (subset, pairing)."""
+        """Bond groups of N-site operators. One group per support subset."""
         sites = list(self.sites)
-        subsets = list(combinations(range(len(sites)), N))
         if is_connected:
-            subsets = [s for s in subsets if _is_connected(sites, s)]
+            subsets = connected_subsets(sites, min_size=N, max_size=N)
+        else:
+            subsets = list(combinations(range(len(sites)), N))
         return [
-            [[s for pair in matching for s in pair]]
+            [[s for pair in matching for s in pair] for matching in _perfect_matchings(subset)]
             for subset in subsets
-            for matching in _perfect_matchings(subset)
         ]
 
 

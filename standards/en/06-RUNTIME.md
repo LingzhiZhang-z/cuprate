@@ -6,8 +6,11 @@ Active workchain, cache, and I/O contract for the current `HubbardModel` +
 ## 1) Active Runtime Boundary (MUST)
 
 MUST:
-- The current active source tree has no production `cuprate.main`,
-  `cuprate.lce`, or `cuprate.embed` entry point.
+- The current active source tree has production `cuprate.main` for raw
+  spin-coupling generation and production `cuprate.lce` for linked-cluster
+  subtraction.
+- The current active source tree has production `cuprate.embed` for target
+  embedding of LCE weights.
 - Runtime code must be rebuilt on top of the active modules:
   `clusters.py`, `states.py`, `sectors.py`, `manifold.py`, `hubbard.py`, and
   `mpi.py`.
@@ -37,9 +40,8 @@ model.merge_by_s2()  # merge twoS sectors inside each twoSz
 model.merge_by_sz()  # merge fixed-twoSz blocks into one full block
 ```
 
-- Public canonical modes are `full`, `fixed_sz`, `block_sz_full`,
-  `fixed_sz_s2`, and `block_sz_s2_full`.
-- Internal mode constants and cache buckets are owned by `hubbard.py`.
+- Public canonical CLI modes are `full`, `Sz`, and `SzS2`.
+- Fixed `twoSz` and `twoS` values are separate optional selector parameters.
 
 ## 3) Eigensystem Cache (MUST)
 
@@ -64,21 +66,32 @@ MUST:
 
 Code form:
 ```python
-cache = Path(cache_dir) / model.label() / cluster.label() / model._bucket
+cache = Path(cache_dir) / cluster.label()
 block.save(cache)
 block = Block.load(cache, twoSz, twoS)
+```
+
+- Runtime path construction is centralized in `cuprate.paths`.
+- Eigensystem data directories are:
+  - `DATA` for `MODE=full`.
+  - `DATA_twoSz` for `MODE=Sz`.
+  - `DATA_twoSz_twoS` for `MODE=SzS2`.
+
+Code form:
+```text
+ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/DATA_twoSz/hole0_class0_idx0/twoSz_0_data.npz
 ```
 
 ## 4) Workchain Computation Model (MUST)
 
 MUST:
 - Cluster enumeration uses `ClusterSets(N)`.
-- ED, projection, and downfolding are computed once per isomorphic family
-  representative, identified by `(hole, class_idx)`.
+- ED, projection, downfolding, fitting, and operator output are computed once
+  per isomorphic family representative, identified by `(hole, class_idx)`.
 - Other `cluster_idx` members in the same family reuse the representative
-  eigensystem/projection data.
-- Fitting and reporting may still be emitted for every `cluster_idx`, using the
-  member cluster's own operator groups.
+  eigensystem, projection data, and fitted exchange coefficients.
+- Per-`cluster_idx` output stores only geometry metadata (`sites` and
+  `indices`) needed to place the family exchange data on that member.
 - The workchain must not solve every isomorphic member independently unless the
   user explicitly disables representative reuse.
 
@@ -91,11 +104,13 @@ MUST:
 - Old names such as `single`, `multi`, `multi_restart`, and
   `adiabatic_restart` are reference-data names only and are not production
   workflow values.
-- `adiabatic` seeds are located from `DELTA`: the previous point is
-  `t_previous = t - DELTA` under the same cache/output root convention.
+- `adiabatic` seeds are explicit. The caller must pass `SEED_RESULTS`, a path
+  to a previously completed `results.json`.
+- The seed selection scheme is read from the seed file's
+  `run_params.workflow`.
 - The adiabatic seed consists of previous block eigenvectors and previous
-  selected indices. The seed must come from the previous point's projection
-  output, not from the solve cache alone.
+  selected indices loaded through that seed file's projection artifact. The
+  seed must come from projection output, not from the solve cache alone.
 - Missing adiabatic seed data is an error. Do not fall back to a baseline
   same-parameter run.
 
@@ -104,7 +119,7 @@ MUST:
 MUST:
 - Derived projection output includes at least selected indices, per-block
   selection diagnostics, `H_eff`, and `T11` metrics.
-- Fit output includes coefficients and fit metrics.
+- Fit output includes family-level coefficients and fit metrics.
 - The workchain/result-output layer owns writing derived outputs.
 - `Block` owns local computation and optional selection JSONL logging, but not
   the durable result schema.
@@ -117,11 +132,70 @@ MUST:
 - CLI keys are case-insensitive.
 - Canonical keys include:
   - `N`, `U`, `T`: physical parameters.
-  - `MODE`: one of the five public modes.
-  - `twoSz`, `twoS`: fixed-sector labels when required by `MODE`.
+  - `MODE`: one of `full`, `Sz`, or `SzS2`.
+  - `twoSz`, `twoS`: optional fixed-block selectors. `twoS` requires
+    `MODE=SzS2` and a fixed `twoSz`.
   - `workflow`: one of `occ`, `energy`, `greedy`, `greedy_multi`, `adiabatic`.
   - `CACHE_MODE`: one of `none`, `load`, `save`, `partial`.
-  - `CACHE_DIR`: root directory for the solve cache.
-  - `DELTA`: adiabatic step size.
+  - `ROOT`: root directory for all `block_main`, `block_lce`, and
+    `block_embed` outputs.
+  - `SEED_RESULTS`: previous `results.json`, required only for
+    `workflow=adiabatic`.
+- `CACHE_DIR`, `OUTPUT_DIR`, and `INPUTS` are not production CLI keys.
+- `cuprate.lce` uses the same thin `KEY=VALUE` boundary as `cuprate.main`;
+  for this stage `N` means `Nmax`.
+- `cuprate.lce` reads main results automatically from `N=2..Nmax`.
+- `cuprate.lce` writes `lce_results.json` as a manifest plus concrete cluster
+  weights under `weights/`.
+- `cuprate.embed` must read the corresponding `lce_results.json` manifest and
+  its referenced weight files.
 - The standard does not permit production keys `TYPE`, `SZ`, `S`, `S2`,
   `SZ_IDX`, `S_IDX`, `SELECT`, or `MATCH_SPIN_SECTORS`.
+
+## 8) Runtime Directory Contract (MUST)
+
+MUST:
+- The three runtime stages differ only by the stage prefix:
+  - `block_main`
+  - `block_lce`
+  - `block_embed`
+- The common parameter directory token is
+  `N_{N}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}`.
+- Workflow outputs live under `mode_* / workflow_*`.
+
+Code form:
+```text
+ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/results.json
+ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0/workflow_occ/results.json
+ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0_twoS_2/workflow_occ/results.json
+ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/lce_results.json
+ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.json
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/
+```
+
+## 9) Future Partial-Family Runs (MAY)
+
+MAY:
+- The first production `cuprate.main` workchain computes the complete
+  `(hole, class_idx)` family set for the requested `N`.
+- A future optimization may add an explicit family-selection parameter, for
+  example `FAMILIES=0:0,0:1,1:0`.
+- The selection unit is a family `(hole, class_idx)`, not an individual
+  `cluster_idx`, unless representative reuse is explicitly redesigned.
+- Family selection must be applied to the global family task list before MPI
+  rank distribution. Do not filter independently inside each rank after
+  slicing.
+
+Code form:
+```python
+families = _enumerate_families(N)
+families = _filter_families(families, selected_families)
+for family in families[rank::size]:
+    process_family(family)
+```
+
+- Partial-family output must be marked explicitly in `results.json`; downstream
+  LCE must reject partial main outputs unless a future debug/partial mode is
+  explicitly requested.
+- For `workflow=adiabatic`, the seed `results.json` only needs to contain the
+  selected families that the current partial run will process.

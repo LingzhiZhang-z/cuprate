@@ -11,7 +11,10 @@
 - `twoSz` (not `two_sz`, `sz`, `Sz`)
 - `twoS` (not `two_s`, `s`, `S`)
 - `S2` for S² (not `s_squared`, `ssq`, `SSquared`)
-- Mode strings: `fixed_sz_s2`, `block_sz_s2_full` (not `fixed_sz_ssq`, `block_sz_ssq_full`)
+- CLI `MODE` strings: `full`, `Sz`, `SzS2`
+- Path mode tokens: `mode_full`, `mode_twoSz`, `mode_twoSz_<value>`,
+  `mode_twoSz_twoS`, `mode_twoSz_<value>_twoS`,
+  `mode_twoSz_<value>_twoS_<value>`
 - Path tokens: `twoSz_<value>`, `twoS_<value>`, negative uses `n` prefix (`twoSz_n1`)
 - CLI: `workflow` (not `TYPE`)
 
@@ -21,9 +24,9 @@
 00-CONVENTIONS       Naming, tolerances
 01-CLUSTERS          Geometry (independent of physics)
 02-HAMILTONIAN       Fock basis (§1-7) + Hubbard model (§8-11)
-03-SYMMETRY_SECTORS  Sz/S² block diagonalization, five modes
+03-SYMMETRY_SECTORS  Sz/S² block diagonalization, modes
 04-DOWNFOLDING       Selection → T₁₁ → H_eff → spin fit
-05-LCE_AND_EMBEDDING Möbius inversion + supercell embedding contract
+05-LCE_AND_EMBEDDING Möbius inversion + embed output contract
 06-RUNTIME           Workchain/cache/output contract
 07-TESTING           Regression/reference-data policy
 08-OPERATOR_OUTPUT   Spin-coupling and projection output schema
@@ -35,7 +38,9 @@
   `hubbard.py` → `states.py` → `sectors.py` → `manifold.py`
 - Read `hubbard.py` first:
   it is the active single-cluster coordinator. `HubbardModel` owns basis generation, symmetry blocking, Hamiltonian construction, solving, merging, projection, and fitting state. Its lifecycle is `set_symmetry()` → `build_hamiltonians()` → `solve()` → optional `merge_by_s2()` / `merge_by_sz()` → `project()` → `fit()`.
-- `hubbard.py` owns the public mode aliases and internal `MODE_*` constants. The public canonical modes remain `full`, `fixed_sz`, `block_sz_full`, `fixed_sz_s2`, and `block_sz_s2_full`.
+- Runtime mode parsing is centralized in `paths.py`; `hubbard.py` consumes the
+  parsed mode spec. `MODE` chooses the block layer, while optional `twoSz` and
+  `twoS` choose a specific block subset.
 - Read `states.py`:
   it defines the Fock basis, sorting, double occupation, state-space `Sz`/`S2` operators, and fermionic signs — the primitives consumed by `hubbard.py`.
 - Read `sectors.py` after that:
@@ -65,15 +70,16 @@
 - `Block` (in `manifold.py`) — one symmetry block with `basis_states`, optional `ham`, `eigvals`, `eigvecs`, optional `basis_transform`, `twoSz`, and `twoS`; owns `spin_fock_rows`, `spin_sector_columns`, `spin_dim`, `t11_norm`, `selected_*`, `downfold`, and `_spin_operators`.
 - `HubbardModel` (in `hubbard.py`) — the active single-cluster coordinator. It stores solved `blocks` and in-memory projection/fit results (`selected_indices`, `selection_info`, `heff`, `t11m1_norms`, `coupling_coeffs`, `fit_metrics`).
 
-## Five diagonalization modes
+## Diagonalization modes
 
 | Mode | Blocks before optional merge | Optional reconstruction |
 |------|------------------------------|-------------------------|
 | `full` | One full Fock block | N/A |
-| `fixed_sz` | One fixed-`twoSz` block | No |
-| `block_sz_full` | All fixed-`twoSz` blocks | `merge_by_sz()` |
-| `fixed_sz_s2` | One fixed-`(twoSz,twoS)` block | No |
-| `block_sz_s2_full` | All fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
+| `Sz, twoSz=<value>` | One fixed-`twoSz` block | No |
+| `Sz` | All fixed-`twoSz` blocks | `merge_by_sz()` |
+| `SzS2, twoSz=<value>, twoS=<value>` | One fixed-`(twoSz,twoS)` block | No |
+| `SzS2, twoSz=<value>` | All `twoS` blocks at one fixed `twoSz` | optional `merge_by_s2()` |
+| `SzS2` | All fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
 
 ## Do not modify tests without explicit request
 

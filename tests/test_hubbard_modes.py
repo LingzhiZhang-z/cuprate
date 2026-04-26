@@ -32,9 +32,17 @@ def _make_cluster(N: int, bonds: list[tuple[int, int]]) -> Cluster:
 def _run_mode(N, U, t, bonds, mode_name, *, twoSz=None, twoS=None):
     """Solve a HubbardModel mode and return its sorted real spectrum."""
     cluster = _make_cluster(N, bonds)
-    result = HubbardModel(cluster, U, t).solve(mode_name, twoSz=twoSz, twoS=twoS)
+    result = _solve_model(cluster, U, t, mode_name, twoSz=twoSz, twoS=twoS)
     eigvals = np.concatenate([np.real(block.eigvals) for block in result.blocks])
     return np.sort(eigvals)
+
+
+def _solve_model(cluster, U, t, mode_name, *, twoSz=None, twoS=None):
+    model = HubbardModel(cluster, U, t)
+    model.set_symmetry(mode_name, twoSz=twoSz, twoS=twoS)
+    model.build_hamiltonians()
+    model.solve()
+    return model
 
 
 @pytest.mark.parametrize("N,bonds", [(2, [(0, 1)]), (3, [(0, 1), (1, 2), (0, 2)])])
@@ -80,24 +88,22 @@ def test_fixed_sz_s2_all_matches_fixed_sz():
 
 def test_block_quantum_numbers_fixed_sz():
     cluster = _make_cluster(2, [(0, 1)])
-    result = HubbardModel(cluster, 4.0, 1.0).solve("fixed_sz", twoSz=0)
+    result = _solve_model(cluster, 4.0, 1.0, "fixed_sz", twoSz=0)
     block = result.blocks[0]
-    qnums = block.quantum_numbers()
 
-    assert len(qnums) == len(block.eigvals)
-    assert {entry["twoSz"] for entry in qnums} == {0}
-    assert all(0.0 <= entry["D"] <= 2.0 for entry in qnums)
+    assert len(block.eigenstate_twoSz()) == len(block.eigvals)
+    assert set(block.eigenstate_twoSz()) == {0}
+    assert np.all((0.0 <= block.eigenstate_D()) & (block.eigenstate_D() <= 2.0))
 
 
 def test_block_quantum_numbers_fixed_sz_s2_all():
     cluster = _make_cluster(2, [(0, 1)])
-    result = HubbardModel(cluster, 4.0, 1.0).solve("fixed_sz_s2_all", twoSz=0)
+    result = _solve_model(cluster, 4.0, 1.0, "fixed_sz_s2_all", twoSz=0)
 
     assert {(block.twoSz, block.twoS) for block in result.blocks} == {(0, 0), (0, 2)}
 
     for block in result.blocks:
-        qnums = block.quantum_numbers()
-        assert len(qnums) == len(block.eigvals)
-        assert {entry["twoSz"] for entry in qnums} == {block.twoSz}
-        assert {entry["twoS"] for entry in qnums} == {block.twoS}
-        assert all(0.0 <= entry["D"] <= 2.0 for entry in qnums)
+        assert len(block.eigenstate_twoSz()) == len(block.eigvals)
+        assert set(block.eigenstate_twoSz()) == {block.twoSz}
+        assert set(block.eigenstate_twoS()) == {block.twoS}
+        assert np.all((0.0 <= block.eigenstate_D()) & (block.eigenstate_D() <= 2.0))

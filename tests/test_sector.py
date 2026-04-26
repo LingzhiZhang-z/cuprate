@@ -66,7 +66,9 @@ def test_build_S2_sectors_labels(N):
     grouped, sector_blocks, _ = _pipeline(N)
     cols_per_tsz_d = {}
 
-    for twoSz, twoS, D, states, coeff in sector_blocks:
+    for block in sector_blocks:
+        twoSz, twoS, D = block.twoSz, block.twoS, block.D
+        states, coeff = block.basis_states, block.transform
         coeff = np.asarray(coeff)
         Sz = np.diag([calc_Sz(s, N) for s in states])
         fourS2 = calc_fourS2_matrix(states, N)
@@ -97,7 +99,7 @@ def test_build_S2_transforms_labels(N):
     for twoSz in basis:
         basis[twoSz] = sort_states(basis[twoSz], N)
 
-    sector_keys = {(twoSz, twoS) for twoSz, twoS, *_ in sector_blocks}
+    sector_keys = {(block.twoSz, block.twoS) for block in sector_blocks}
     assert sector_keys == set(transformers)
 
     for (twoSz, twoS), U in transformers.items():
@@ -118,7 +120,10 @@ def test_build_S2_transforms_labels(N):
 def test_sector_block_counts_analytic(N):
     """Column counts per (twoSz, twoS, D) match the closed-form multiplet formula."""
     _grouped, sector_blocks, _ = _pipeline(N)
-    got = {(twoSz, twoS, D): coeff.shape[1] for twoSz, twoS, D, _st, coeff in sector_blocks}
+    got = {
+        (block.twoSz, block.twoS, block.D): block.transform.shape[1]
+        for block in sector_blocks
+    }
 
     for key, cnt in got.items():
         assert cnt == _expected_cols(N, *key), f"{key}: got {cnt}, expected {_expected_cols(N, *key)}"

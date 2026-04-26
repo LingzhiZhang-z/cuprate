@@ -59,28 +59,32 @@ MUST:
 - The canonical runtime workflow parameter name is `workflow`.
 - Standards and implementation must not introduce alternative canonical names such as
   `ssq`, `s_squared`, `sz`, or `s` for these quantities.
-- The only canonical mode spellings are:
-  - `full`
-  - `fixed_sz`
-  - `block_sz_full`
-  - `fixed_sz_s2`
-  - `block_sz_s2_full`
-- `MODE=all` is accepted only as an input alias for `MODE=full`.
+- The only canonical CLI `MODE` spellings are `full`, `Sz`, and `SzS2`.
+- `MODE` chooses the diagonalization block layer. Optional `twoSz` and `twoS`
+  CLI parameters choose a specific block subset inside that layer.
 - Canonical runtime path tokens are:
+  - `N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>`
   - `twoSz_<value>` (negative values use `n` prefix: `twoSz_n1` for $-1$)
   - `twoS_<value>` (`twoS` is always non-negative, no `n` prefix needed)
-  - `twoSz_all`
-  - `twoSz_all_twoS_all`
-- Legacy names such as `fixed_sz_ssq`, `block_sz_ssq_full`, `_sz...`, `_s...`,
-  `SZ`, `S`, `S2`, `SZ_IDX`, `S_IDX`, and `TYPE` are not part of the standard.
+  - `mode_full`
+  - `mode_twoSz`
+  - `mode_twoSz_<value>`
+  - `mode_twoSz_twoS`
+  - `mode_twoSz_<value>_twoS`
+  - `mode_twoSz_<value>_twoS_<value>`
+- Path `mode_*` tokens are output directory names, not accepted CLI `MODE`
+  values.
+- Legacy CLI names such as `fixed_sz`, `block_sz_full`, `fixed_sz_s2`,
+  `fixed_sz_s2_all`, `block_sz_s2_full`, `fixed_sz_ssq`,
+  `block_sz_ssq_full`, `_sz...`, `_s...`, `SZ`, `S`, `S2`, `SZ_IDX`,
+  `S_IDX`, and `TYPE` are not part of the production CLI standard.
 
 Code form:
 ```text
 canonical physics names: twoSz, twoS, S2
 canonical workflow key: workflow
-canonical modes: full, fixed_sz, block_sz_full, fixed_sz_s2, block_sz_s2_full
-MODE input alias: all -> full
-canonical path tokens: twoSz_<value>, twoS_<value>, twoSz_all, twoSz_all_twoS_all
+canonical CLI modes: full, Sz, SzS2
+canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*
 negative value encoding: n prefix (e.g. twoSz_n1 = twoSz = -1)
 ```
 

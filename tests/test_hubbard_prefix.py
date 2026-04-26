@@ -38,7 +38,7 @@ def test_block_label():
 
 def test_cache_path_has_cluster_layer(tmp_path):
     model = HubbardModel(_two_site_cluster(0), U=4.0, t=1.0)
-    model.solve(mode="fixed_sz_s2", twoSz=0, twoS=0, cache_dir=tmp_path)
+    _solve_model(model, "fixed_sz_s2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
     bucket_dir = tmp_path / model.label() / "hole0_class0_idx0" / "sz_s2_block"
     assert (bucket_dir / "twoSz_0_twoS_0_data.npz").exists()
     assert (bucket_dir / "twoSz_0_twoS_0_label.txt").exists()
@@ -46,16 +46,38 @@ def test_cache_path_has_cluster_layer(tmp_path):
 
 def test_cache_hit_round_trip(tmp_path):
     model = HubbardModel(_two_site_cluster(0), U=4.0, t=1.0)
-    r1 = model.solve(mode="fixed_sz_s2", twoSz=0, twoS=0, cache_dir=tmp_path)
-    r2 = model.solve(mode="fixed_sz_s2", twoSz=0, twoS=0, cache_dir=tmp_path)
+    r1 = _solve_model(model, "fixed_sz_s2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
+    r2 = _solve_model(
+        HubbardModel(_two_site_cluster(0), U=4.0, t=1.0),
+        "fixed_sz_s2",
+        twoSz=0,
+        twoS=0,
+        cache_mode="load",
+        cache_dir=tmp_path,
+    )
     assert np.allclose(r1.blocks[0].eigvals, r2.blocks[0].eigvals)
 
 
 def test_different_clusters_do_not_collide(tmp_path):
     m1 = HubbardModel(_two_site_cluster(0), U=4.0, t=1.0)
     m2 = HubbardModel(_two_site_cluster(1), U=4.0, t=1.0)
-    m1.solve(mode="fixed_sz_s2", twoSz=0, twoS=0, cache_dir=tmp_path)
-    m2.solve(mode="fixed_sz_s2", twoSz=0, twoS=0, cache_dir=tmp_path)
+    _solve_model(m1, "fixed_sz_s2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
+    _solve_model(m2, "fixed_sz_s2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
     model_dir = tmp_path / m1.label()
     assert (model_dir / "hole0_class0_idx0" / "sz_s2_block" / "twoSz_0_twoS_0_data.npz").exists()
     assert (model_dir / "hole0_class1_idx0" / "sz_s2_block" / "twoSz_0_twoS_0_data.npz").exists()
+
+
+def _solve_model(
+    model: HubbardModel,
+    mode: str,
+    *,
+    twoSz: int | None = None,
+    twoS: int | None = None,
+    cache_mode: str = "none",
+    cache_dir=None,
+) -> HubbardModel:
+    model.set_symmetry(mode, twoSz=twoSz, twoS=twoS)
+    model.build_hamiltonians()
+    model.solve(cache_mode=cache_mode, cache_dir=cache_dir)
+    return model

@@ -28,8 +28,8 @@ MUST:
   ```
   data_test/
   └── Block_U{U:.4f}_t{t:.4f}/
-      ├── N{N}/                                     # 旧 MODE=full (TYPE=all)
-      ├── N{N}_sz{Sz:.4f}/                          # 旧 MODE=fixed_sz
+      ├── N{N}/                                     # 旧完整运行 (TYPE=all)
+      ├── N{N}_sz{Sz:.4f}/                          # 旧固定 Sz 运行
       ├── N{N}_adiabatic_restart/                   # 旧 workflow=adiabatic
       ├── N{N}_multi_restart/                       # 旧 workflow=multi
       ├── N{N}_sz{Sz:.4f}_adiabatic_restart/
@@ -62,7 +62,7 @@ MUST:
 | 旧模式 | 新等价 | 转换规则 |
 |--------|--------|----------|
 | `Block_U{U}_t{t}` | `U{U}_t{t}` | 去掉 `Block_` 前缀 |
-| `N{N}` | `N{N}` (MODE=full) | 不变 |
+| `N{N}` | `MODE=full` | 完整 Fock 模式 |
 | `N{N}_sz{Sz:.4f}` | `N{N}_twoSz_{twoSz}` | `twoSz = int(2 * Sz)` |
 | `N{N}_multi_restart` | workflow `greedy_multi` 参考用例 | 仅为旧数据名称 |
 | `N{N}_adiabatic_restart` | workflow `adiabatic` 参考用例 | 仅为旧数据名称 |
@@ -80,7 +80,7 @@ MUST:
 
 | 旧键 | 新键 | 转换 |
 |------|------|------|
-| `TYPE` | `MODE` | `TYPE=all` → `MODE=full`，`TYPE=sz` → `MODE=fixed_sz` |
+| `TYPE` | `MODE` | `TYPE=all` → `MODE=full`，`TYPE=sz` → `MODE=Sz` |
 | `SZ` | `twoSz` | `twoSz = int(2 * SZ)` |
 | `S` | `twoS` | `twoS = int(2 * S)` |
 | `WORKFLOW=multi` | `workflow=greedy_multi` | 仅测试侧转换 |
@@ -140,15 +140,15 @@ MUST:
 |------|------|------|
 | N=2, full | U=1, t=0.24 | 最小团簇，完整对角化，基线 |
 | N=4, full | U=1, t=0.24 | 4 格点含空穴，同构类 |
-| N=4, fixed_sz | U=1, t=0.24, Sz=0 | Sz 分块模式 |
-| N=6, fixed_sz | U=1, t=0.24, Sz=0 | 更大团簇，更多扇区 |
+| N=4, `MODE=Sz twoSz=0` | U=1, t=0.24 | Sz 分块模式 |
+| N=6, `MODE=Sz twoSz=0` | U=1, t=0.24 | 更大团簇，更多扇区 |
 | N=4, adiabatic | U=1, t=0.24 | 绝热选择（需 t=0.22 作为前一点） |
 
 ### 5.2) 扩展回归集
 
 - t=0.24 下所有 N（2 到 7），所有模式。
 - 边界参数点：t=0.02（强耦合）和 t=0.60（弱耦合）。
-- N=8 fixed_sz（可用的最大尺寸，测试可扩展性）。
+- N=8 `MODE=Sz twoSz=0`（可用的最大尺寸，测试可扩展性）。
 
 ## 6) 测试基础设施 (MUST)
 

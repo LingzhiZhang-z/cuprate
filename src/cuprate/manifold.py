@@ -10,6 +10,7 @@ from typing import Sequence
 import numpy as np
 
 from cuprate import ATOL
+from cuprate.paths import block_token
 from cuprate.states import (
     calc_double_occupation_matrix,
     calc_fourS2_matrix,
@@ -37,14 +38,8 @@ class Block:
     basis_transform: np.ndarray | None = None
 
     @staticmethod
-    def _fmt_value(value: int | None) -> str:
-        if value is None:
-            return "all"
-        return f"n{-value}" if value < 0 else str(value)
-
-    @staticmethod
     def _label(twoSz: int | None, twoS: int | None) -> str:
-        return f"twoSz_{Block._fmt_value(twoSz)}_twoS_{Block._fmt_value(twoS)}"
+        return block_token(twoSz, twoS)
 
     def label(self) -> str:
         return self._label(self.twoSz, self.twoS)

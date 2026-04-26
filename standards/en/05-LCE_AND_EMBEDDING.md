@@ -1,6 +1,6 @@
 # 05-LCE_AND_EMBEDDING
 
-Linked-cluster expansion (subcluster subtraction) and supercell embedding.
+Linked-cluster expansion (subcluster subtraction) and embed output.
 
 ## 1) LCE Goal (MUST)
 
@@ -20,7 +20,8 @@ $$
 MUST:
 - For a cluster of $N$ sites, all connected subgraphs of size $2$ to $N-1$ are enumerated.
 - Connectivity is by NN adjacency (Manhattan distance $= 1$).
-- Each subgraph is matched to a previously computed cluster result via weighted-graph isomorphism.
+- Each subgraph is matched to a previously computed cluster result via NN-graph isomorphism.
+- LCE input must contain consecutive `N=2..Nmax` raw spin-coupling results.
 
 Code form:
 ```python
@@ -32,11 +33,13 @@ match = find_cluster_match(subgraph, clusters)
 ## 3) Operator Subtraction (MUST)
 
 MUST:
-- The operator list has the structure:
-  `[constant, [2-site terms], [4-site terms], [6-site terms], ...]`
-  where each term is `[site_indices..., coefficient]`.
+- LCE reads fitted operators from the `results.json` schema in
+  `08-OPERATOR_OUTPUT.md`; it does not read text files or projection NPZ files.
+- The operator data contains a constant term plus keyed spin-coupling terms.
 - Subtraction maps subcluster site indices to parent cluster indices via the isomorphism mapping,
   then subtracts coefficients term by term.
+- Operator identity is the canonical `key` field, not the display labels `J*`,
+  `K*`, or `L*`.
 
 Code form:
 ```python
@@ -52,40 +55,141 @@ k4s(i, j, k, l)    = sorted([(sorted([i,j]), sorted([k,l]))])
 k6s(i,j,k,l,m,n)   = sorted([(sorted([i,j]), sorted([k,l]), sorted([m,n]))])
 ```
 
-Validation:
-- After LCE, the net contribution of a 1-site cluster is zero (no bonds).
-- Summing all $W(C')$ for $C' \subseteq C$ must recover $O(C)$.
-
-## 4) Supercell Embedding (MUST)
+## 4) LCE Output (MUST)
 
 MUST:
-- LCE net couplings are placed onto a periodic square supercell of size $N_{\text{cell}} \times N_{\text{cell}}$.
-- For each cluster, all symmetry-distinct orientations are generated (up to 8 via C4v),
-  then each orientation is translated to all $N_{\text{cell}}^2$ positions under PBC.
-- Site indices in the supercell: `index = x * N_cell + y`, with PBC: `x_pbc = x % N_cell`.
+- The LCE entry point writes `lce_results.json`, per-cluster weight files under
+  `weights/`, and a minimal `lce_summary.txt`.
+- `lce_results.json` has `result_kind = "lce_spin_couplings"`.
+- `lce_results.json` is a manifest. It records run parameters and points to one
+  weight file per concrete cluster.
+- Weight files live under `weights/` and are named
+  `hole{h}_class{c}_idx{v}.json`.
+- Each weight file has `result_kind = "lce_cluster_weight"`.
+- Each weight file records `sites`, `indices`, the net operators `W(C)` using
+  the same operator group schema as raw spin couplings, and reconstruction
+  diagnostics.
+
+Manifest form:
+```json
+{
+  "schema_version": 1,
+  "result_kind": "lce_spin_couplings",
+  "weights": [
+    {
+      "N": 4,
+      "hole": 0,
+      "class_idx": 1,
+      "cluster_idx": 0,
+      "weight_file": "weights/hole0_class1_idx0.json"
+    }
+  ]
+}
+```
+
+Weight-file form:
+```json
+{
+  "schema_version": 1,
+  "result_kind": "lce_cluster_weight",
+  "N": 4,
+  "hole": 0,
+  "class_idx": 1,
+  "cluster_idx": 0,
+  "sites": [[0, 0], [1, 0], [0, 1], [1, 1]],
+  "indices": [0, 1, 2, 3],
+  "operators": {"constant_term": {"real": 0.0, "imag": 0.0}, "groups": []},
+  "raw_summary": {},
+  "diagnostics": {
+    "subcluster_count": 0,
+    "reconstruction_error": 0.0,
+    "net_term_count": 0,
+    "max_abs_net_coefficient": 0.0
+  }
+}
+```
+
+Validation:
+- For every cluster, summing all connected subcluster net contributions
+  $W(C')$ for $C' \subseteq C$ must recover the raw fitted operators $O(C)$
+  within `ATOL["loose"]`.
+- For `N=2`, the net operators equal the raw operators.
+
+## 5) Embed Input And Output (MUST)
+
+MUST:
+- The embed stage must read the `lce_results.json` manifest and its
+  referenced weight files, not raw `results.json`.
+- Output lives under
+  `ROOT/block_embed/N_{Nmax}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/`.
+- `embed_results.json` is a manifest with
+  `result_kind = "embedded_spin_couplings"`.
+- `embed_summary.txt` records the source LCE file and output counts.
+- `two_site.txt` contains all candidate two-site bond vectors within `Nmax`;
+  vectors not present in accumulated LCE output are written as `None`.
+- Multi-site cluster files are named `N{N}_hole{h}_class{c}_idx{i}.txt`.
+- Production code uses the name `embed`, not `periodize`.
+
+Code form:
+```text
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/two_site.txt
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/clusters/N4_hole0_class0_idx0.txt
+```
+
+## 6) Embed Matching Algorithm (MUST)
+
+MUST:
+- The numeric algorithm is target-driven.
+- C4v operations are used only to generate distinct parent-cluster
+  orientations.
+- The target is concrete. Matching allows translation only; do not rotate,
+  mirror, canonicalize, or divide by the target multiplicity.
+- Do not compute or output `m(candidate)`.
+- Do not do L2 orbit averaging or build a `Wtilde` numeric path.
+- Do not do another Möbius subtraction in embed.
+
+Code form:
+```text
+for each output target P:
+    value(P) = 0
+    seen(P) = false
+    for each LCE weight W(C):
+        for each distinct C4v orientation g(C):
+            for each term t in W(C) with arity(P):
+                if g(t) matches P by translation only:
+                    value(P) += coeff(t)
+                    seen(P) = true
+```
+
+Validation:
+- Plaquette distinct orientations = 1.
+- Four-site line distinct orientations = 2.
+- L-shape distinct orientations = 8.
+- Synthetic plaquette with each NN two-site term coefficient set to `1.0`
+  gives `two_site.txt[(1,0)] = 2.0`.
+- Synthetic L-tetromino with each NN two-site term coefficient set to `1.0`
+  gives `two_site.txt[(1,0)] = 12.0`.
+
+## 7) Embed Two-Site Candidate Order (MUST)
+
+MUST:
+- Two-site candidates use canonical vectors `(dx, dy)` with `dx >= dy >= 0`
+  and `dx > 0`.
+- Candidate vectors satisfy `dx + dy + 1 <= Nmax`.
+- Sorting is by Manhattan shell, squared distance, then lexicographic vector.
+- This makes increasing `Nmax` append new candidate shells without reordering
+  earlier entries.
 
 Code form:
 ```python
-unique_clusters = unique_cluster_transformed(cluster)  # up to 8 orientations
-indices_pbc = embed_cluster_to_squarecell_pbc(unique_cluster, N_cell)
-embed_operator(couplings_pbc, coupling_net, indices_pbc)
+sorted(candidates, key=lambda v: (v[0] + v[1], v[0]**2 + v[1]**2, v[0], v[1]))
 ```
 
-## 5) Accumulated Coupling Structure (MUST)
+## 8) Embed Multi-Site Text Files (MUST)
 
 MUST:
-- The supercell coupling data structure is:
-  - `couplings[0]`: constant term (scalar).
-  - `couplings[1]`: two-site coupling matrix ($N_{\text{cell}}^2 \times N_{\text{cell}}^2$, complex).
-  - `couplings[2]`: four-site couplings (dict keyed by `k4s` tuples).
-  - `couplings[3]`: six-site couplings (dict keyed by `k6s` tuples).
-  - `couplings[4]`: eight-site couplings (dict keyed by `k8s` tuples).
-- Two-site couplings are symmetrised: both `[i,j]` and `[j,i]` are incremented.
-
-## 6) Output Analysis (MUST)
-
-MUST:
-- Two-site couplings are grouped by canonical bond vector and sorted by magnitude.
-- Four-site couplings are classified into 5 topological types (square, T-shape, line variants)
-  via `normalize_four_sites`.
-- Results are written with both human-readable text and machine-readable JSON artifacts.
+- Four-site and six-site embed files list the cluster sites, the site
+  indices, all perfect pairings, and the coefficient for each pairing.
+- Missing pairings are written as `None`.
+- Files are written under `clusters/`.
+- A simple text graph section may be added, but is not required.

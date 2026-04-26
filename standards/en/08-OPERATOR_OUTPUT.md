@@ -62,6 +62,8 @@ MUST:
 
 - LCE and embed must continue to match operators by canonical keys
   (`k4s`, `k6s`, `k8s`), not by K/L label position.
+- The canonical key is serialized on every term as sorted pair lists:
+  `[[i,j]]`, `[[i,j],[k,l]]`, or `[[i,j],[k,l],[m,n]]`.
 
 Code form:
 ```python
@@ -139,53 +141,115 @@ MUST:
 ## 6) Machine-Readable Output (MUST)
 
 MUST:
-- Per-cluster sidecar JSON files are written as `hole{h}_class{c}_cluster{v}_results.json`.
-  Each sidecar contains the same payload shape as the corresponding entry in the consolidated results.
-- File name: `results.json` in the run output directory.
-- Contains all cluster results for the run in a single file.
-- `projection` is required for spin-coupling results because it is the durable
-  location for selected eigenstate indices and per-block projection diagnostics.
-- Structure:
+- File name: `results.json` in the main workflow output directory:
+  `ROOT/block_main/N_{N}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/results.json`.
+- `results.json` is a manifest. It records run parameters and points to one
+  exchange file plus one cluster-geometry file per `(hole, class_idx)` family.
+- Current production `cuprate.main` output represents the complete family set
+  for the requested `N`.
+- A future partial-family optimization must mark incompleteness explicitly in
+  the manifest before LCE is allowed to consume it. The intended future shape is:
   ```json
   {
-    "schema_version": 2,
+    "complete_family_set": false,
+    "family_selection": {
+      "mode": "explicit",
+      "families": [[0, 0], [0, 1]]
+    }
+  }
+  ```
+- Exchange files live under `exchanges/` and are named
+  `hole{h}_class{c}_exchange.json`.
+- Cluster-geometry files live under `clusters/` and are named
+  `hole{h}_class{c}_clusters.json`.
+- No per-cluster sidecar JSON is written.
+- `projection` is required in each exchange file because it is the durable
+  location for selected eigenstate indices and per-block projection diagnostics.
+- Manifest structure:
+  ```json
+  {
+    "schema_version": 5,
     "result_kind": "spin_couplings",
-    "run_params": {"U": 1.0, "t": 0.24, "N": 4, "MODE": "full", "workflow": "greedy"},
-    "clusters": [
+    "run_params": {
+      "U": 1.0,
+      "T": 0.24,
+      "N": 4,
+      "nelec": 4,
+      "MODE": "full",
+      "twoSz": null,
+      "twoS": null,
+      "workflow": "greedy",
+      "parameter_token": "N_4_nelec_4_U_1.0000_t_0.2400",
+      "mode_token": "mode_full",
+      "workflow_token": "workflow_greedy"
+    },
+    "families": [
       {
         "hole": 0,
         "class_idx": 0,
+        "exchange_file": "exchanges/hole0_class0_exchange.json",
+        "clusters_file": "clusters/hole0_class0_clusters.json"
+      }
+    ]
+  }
+  ```
+- Exchange file structure:
+  ```json
+  {
+    "schema_version": 5,
+    "result_kind": "spin_coupling_exchange",
+    "N": 4,
+    "hole": 0,
+    "class_idx": 0,
+    "representative_cluster_idx": 0,
+    "representative_sites": [[0,0], [1,0], [0,1], [1,1]],
+    "projection": {
+      "method": "greedy",
+      "artifact": "artifacts/hole0_class0_projection.npz",
+      "blocks": [
+        {
+          "block": "full",
+          "twoSz": null,
+          "twoS": null,
+          "selected_indices": [0, 1, 2, 3],
+          "t11_minus_1_norm": 0.0,
+          "overlap": null,
+          "selection_info": {}
+        }
+      ]
+    },
+    "operators": {
+      "constant_term": {"real": ..., "imag": ...},
+      "groups": [...]
+    },
+    "fit": {
+      "relative_error": ...,
+      "residual": ...,
+      "r_squared": ...,
+      "t11_minus_1_norm": ...,
+      "overlap": ...
+    },
+    "metadata": {
+      "rank": 0,
+      "computation_time_s": 1.23
+    }
+  }
+  ```
+- Cluster-geometry file structure:
+  ```json
+  {
+    "schema_version": 5,
+    "result_kind": "cluster_family_geometry",
+    "N": 4,
+    "hole": 0,
+    "class_idx": 0,
+    "representative_cluster_idx": 0,
+    "representative_sites": [[0,0], [1,0], [0,1], [1,1]],
+    "clusters": [
+      {
         "cluster_idx": 0,
         "sites": [[0,0], [1,0], [0,1], [1,1]],
-        "projection": {
-          "method": "greedy",
-          "blocks": [
-            {
-              "block": "twoSz_all_twoS_all",
-              "twoSz": null,
-              "twoS": null,
-              "selected_indices": [0, 1, 2, 3],
-              "t11_minus_1_norm": 0.0,
-              "overlap": null,
-              "selection_info": {}
-            }
-          ]
-        },
-        "operators": {
-          "constant_term": {"real": ..., "imag": ...},
-          "groups": [...]
-        },
-        "fit": {
-          "relative_error": ...,
-          "residual": ...,
-          "r_squared": ...,
-          "t11_minus_1_norm": ...,
-          "overlap": ...
-        },
-        "metadata": {
-          "rank": 0,
-          "computation_time_s": 1.23
-        }
+        "indices": [0, 1, 2, 3]
       }
     ]
   }
@@ -196,19 +260,43 @@ MUST:
     "arity": 2,
     "vector": [1, 0],
     "label": "J1",
-    "terms": [{"sites": [0, 1], "coefficient": {"real": ..., "imag": ...}}]
+    "terms": [
+      {
+        "sites": [0, 1],
+        "key": [[0, 1]],
+        "coefficient": {"real": ..., "imag": ...}
+      }
+    ]
   }
   ```
   For multi-site groups (arity 4, 6, ...), `vector` is `null` and `label` follows
   the prefix convention in §1 (`K1`, `K2`, ...; `L1`, `L2`, ...).
-- Per-cluster metadata (`rank`, `computation_time_s`) lives in a `metadata`
-  sub-object, not at the top level.
+- Multi-site groups also record `support`, the sorted set of involved sites.
+- Every term must include `key`. LCE/embed must use `key` for operator identity;
+  `sites` and `label` are serialization/display aids.
+- Family exchange metadata (`rank`, `computation_time_s`) lives in a
+  `metadata` sub-object, not at the top level.
+- In cluster-geometry files, `indices[k]` is the family/operator site index for
+  `sites[k]`. The current representative-reordered cluster enumeration normally
+  writes `[0, 1, ..., N-1]`.
 - Each entry in `projection.blocks` records selected eigenvector column indices
   in that block's solved eigenvector frame.
+- For `workflow=adiabatic`, `run_params.adiabatic_seed` records the seed
+  `results.json` path, seed schema version, seed run parameters, and seed
+  workflow. Each entry in `projection.blocks` also records its seed block label
+  and seed selected indices.
+- Projection artifacts must contain enough data to seed a later adiabatic run:
+  block labels, basis states, Fock-coordinate eigenvectors, selected indices,
+  `H_eff`, and `T11` metrics.
 - `selection_info` stores method-specific diagnostics. It may contain compact
   summary fields for `greedy_multi`; detailed trial logs may also be written as
   JSONL by the selector, but the final `results.json` is the durable output.
-- `projection_analysis` results use the same consolidated structure with
+- `projection_analysis` results use the same family manifest structure with
   `projection` and without `operators` or `fit`.
-- Future LCE/embed workchains must read from this consolidated JSON, not from
-  text files.
+- LCE workchains must read from the `results.json` manifest plus the referenced
+  exchange and cluster-geometry JSON files, not from text files.
+- LCE output writes an `lce_results.json` manifest plus referenced
+  `weights/hole{h}_class{c}_idx{v}.json` files. Each weight file uses this
+  same `operators` schema for net couplings.
+- Embed workchains must read the LCE manifest and its referenced weight
+  files.

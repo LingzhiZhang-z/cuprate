@@ -94,31 +94,34 @@ MUST:
 
 Code form:
 ```python
-model.merge_by_s2()  # block_sz_s2_full -> block_sz_full frame
-model.merge_by_sz()  # block_sz_full -> full frame
+model.merge_by_s2()  # SzS2 -> Sz frame
+model.merge_by_sz()  # Sz -> full frame
 ```
 
 Validation:
 - Reconstructed eigenvalue count must equal full Hilbert-space dimension $\binom{2N}{N}$.
 
-## 6) Five Diagonalisation Modes (MUST)
+## 6) Diagonalisation Modes (MUST)
 
 MUST:
-- The code supports exactly five modes:
+- The code supports exactly three `MODE` values plus optional block selectors:
 
-| Mode | Blocks before optional merge | Optional reconstruction |
-|------|------------------------------|-------------------------|
-| `full` | one full Fock block | N/A |
-| `fixed_sz` | one fixed-`twoSz` block | No |
-| `block_sz_full` | all fixed-`twoSz` blocks | `merge_by_sz()` |
-| `fixed_sz_s2` | one fixed-`(twoSz,twoS)` block | No |
-| `block_sz_s2_full` | all fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
+| CLI input | Blocks before optional merge | Optional reconstruction |
+|-----------|------------------------------|-------------------------|
+| `MODE=full` | one full Fock block | N/A |
+| `MODE=Sz twoSz=<value>` | one fixed-`twoSz` block | No |
+| `MODE=Sz` | all fixed-`twoSz` blocks | `merge_by_sz()` |
+| `MODE=SzS2 twoSz=<value> twoS=<value>` | one fixed-`(twoSz,twoS)` block | No |
+| `MODE=SzS2 twoSz=<value>` | all `twoS` blocks at one fixed `twoSz` | optional `merge_by_s2()` |
+| `MODE=SzS2` | all fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
 
 - Projection and spin fitting are per current `Block` frame. They are not
-  prohibited by `fixed_sz_s2`; the caller is responsible for choosing the block
+  prohibited by S2-resolved modes; the caller is responsible for choosing the block
   frame whose fitted operators answer the intended physics question.
+- Fixed `twoSz` and `twoS` values are separate optional selectors, not part of
+  `MODE`.
 
 Code form:
 ```python
-model.set_symmetry(mode, twoSz=twoSz, twoS=twoS)
+model.set_symmetry("SzS2", twoSz=0, twoS=0)
 ```

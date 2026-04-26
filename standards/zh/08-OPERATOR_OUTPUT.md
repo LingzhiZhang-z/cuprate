@@ -57,6 +57,8 @@ MUST:
 
 - LCE 和 embed 仍然必须通过规范 key（`k4s`、`k6s`、`k8s`）匹配算符，
   不能依赖 K/L 标签位置。
+- 规范 key 在每个 term 上序列化为排序后的 pair list：
+  `[[i,j]]`、`[[i,j],[k,l]]` 或 `[[i,j],[k,l],[m,n]]`。
 
 Code form:
 ```python
@@ -131,53 +133,112 @@ MUST:
 ## 6) 机器可读输出 (MUST)
 
 MUST:
-- 逐团簇 sidecar JSON 文件写为 `hole{h}_class{c}_cluster{v}_results.json`。
-  每个 sidecar 包含与汇总结果中对应 entry 相同的 payload 形状。
-- 文件名：运行输出目录中的 `results.json`。
-- 包含该运行所有团簇的结果，汇总在单个文件中。
-- `projection` 对 spin-coupling 结果是必需的，因为它是 selected eigenstate
-  indices 和逐 block projection diagnostics 的持久位置。
-- 结构：
+- 文件名：main workflow 输出目录中的 `results.json`：
+  `ROOT/block_main/N_{N}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/results.json`。
+- `results.json` 是 manifest。它记录 run parameters，并为每个
+  `(hole, class_idx)` family 指向一个 exchange 文件和一个 cluster-geometry 文件。
+- 当前生产 `cuprate.main` 输出表示给定 `N` 的完整 family 集合。
+- 未来 partial-family 优化必须先在 manifest 中显式标记不完整性，LCE 才能
+  被允许读取它。预期的未来形状是：
   ```json
   {
-    "schema_version": 2,
+    "complete_family_set": false,
+    "family_selection": {
+      "mode": "explicit",
+      "families": [[0, 0], [0, 1]]
+    }
+  }
+  ```
+- Exchange 文件位于 `exchanges/`，命名为 `hole{h}_class{c}_exchange.json`。
+- Cluster-geometry 文件位于 `clusters/`，命名为 `hole{h}_class{c}_clusters.json`。
+- 不再写 per-cluster sidecar JSON。
+- 每个 exchange 文件中必须包含 `projection`，因为它是 selected eigenstate
+  indices 和逐 block projection diagnostics 的持久位置。
+- Manifest 结构：
+  ```json
+  {
+    "schema_version": 5,
     "result_kind": "spin_couplings",
-    "run_params": {"U": 1.0, "t": 0.24, "N": 4, "MODE": "full", "workflow": "greedy"},
-    "clusters": [
+    "run_params": {
+      "U": 1.0,
+      "T": 0.24,
+      "N": 4,
+      "nelec": 4,
+      "MODE": "full",
+      "twoSz": null,
+      "twoS": null,
+      "workflow": "greedy",
+      "parameter_token": "N_4_nelec_4_U_1.0000_t_0.2400",
+      "mode_token": "mode_full",
+      "workflow_token": "workflow_greedy"
+    },
+    "families": [
       {
         "hole": 0,
         "class_idx": 0,
+        "exchange_file": "exchanges/hole0_class0_exchange.json",
+        "clusters_file": "clusters/hole0_class0_clusters.json"
+      }
+    ]
+  }
+  ```
+- Exchange 文件结构：
+  ```json
+  {
+    "schema_version": 5,
+    "result_kind": "spin_coupling_exchange",
+    "N": 4,
+    "hole": 0,
+    "class_idx": 0,
+    "representative_cluster_idx": 0,
+    "representative_sites": [[0,0], [1,0], [0,1], [1,1]],
+    "projection": {
+      "method": "greedy",
+      "artifact": "artifacts/hole0_class0_projection.npz",
+      "blocks": [
+        {
+          "block": "full",
+          "twoSz": null,
+          "twoS": null,
+          "selected_indices": [0, 1, 2, 3],
+          "t11_minus_1_norm": 0.0,
+          "overlap": null,
+          "selection_info": {}
+        }
+      ]
+    },
+    "operators": {
+      "constant_term": {"real": ..., "imag": ...},
+      "groups": [...]
+    },
+    "fit": {
+      "relative_error": ...,
+      "residual": ...,
+      "r_squared": ...,
+      "t11_minus_1_norm": ...,
+      "overlap": ...
+    },
+    "metadata": {
+      "rank": 0,
+      "computation_time_s": 1.23
+    }
+  }
+  ```
+- Cluster-geometry 文件结构：
+  ```json
+  {
+    "schema_version": 5,
+    "result_kind": "cluster_family_geometry",
+    "N": 4,
+    "hole": 0,
+    "class_idx": 0,
+    "representative_cluster_idx": 0,
+    "representative_sites": [[0,0], [1,0], [0,1], [1,1]],
+    "clusters": [
+      {
         "cluster_idx": 0,
         "sites": [[0,0], [1,0], [0,1], [1,1]],
-        "projection": {
-          "method": "greedy",
-          "blocks": [
-            {
-              "block": "twoSz_all_twoS_all",
-              "twoSz": null,
-              "twoS": null,
-              "selected_indices": [0, 1, 2, 3],
-              "t11_minus_1_norm": 0.0,
-              "overlap": null,
-              "selection_info": {}
-            }
-          ]
-        },
-        "operators": {
-          "constant_term": {"real": ..., "imag": ...},
-          "groups": [...]
-        },
-        "fit": {
-          "relative_error": ...,
-          "residual": ...,
-          "r_squared": ...,
-          "t11_minus_1_norm": ...,
-          "overlap": ...
-        },
-        "metadata": {
-          "rank": 0,
-          "computation_time_s": 1.23
-        }
+        "indices": [0, 1, 2, 3]
       }
     ]
   }
@@ -188,17 +249,40 @@ MUST:
     "arity": 2,
     "vector": [1, 0],
     "label": "J1",
-    "terms": [{"sites": [0, 1], "coefficient": {"real": ..., "imag": ...}}]
+    "terms": [
+      {
+        "sites": [0, 1],
+        "key": [[0, 1]],
+        "coefficient": {"real": ..., "imag": ...}
+      }
+    ]
   }
   ```
   对于多格点组（arity 4, 6, ...），`vector` 为 `null`，`label` 遵循
   §1 中的前缀约定（`K1`、`K2`、...；`L1`、`L2`、...）。
-- 每个团簇的元数据（`rank`、`computation_time_s`）放在 `metadata` 子对象中，
-  不混入顶层。
+- 多格点组还记录 `support`，即参与格点的有序集合。
+- 每个 term 必须包含 `key`。LCE/embed 必须用 `key` 判断算符身份；
+  `sites` 和 `label` 只是序列化/显示辅助。
+- Family exchange 元数据（`rank`、`computation_time_s`）放在 `metadata`
+  子对象中，不混入顶层。
+- 在 cluster-geometry 文件中，`indices[k]` 是 `sites[k]` 对应的
+  family/operator site index。当前代表元重排后的 cluster enumeration 通常写
+  `[0, 1, ..., N-1]`。
 - `projection.blocks` 中的每个条目记录该 block 已求解本征向量框架中的
   selected eigenvector column indices。
+- 对于 `workflow=adiabatic`，`run_params.adiabatic_seed` 记录 seed
+  `results.json` 路径、seed schema version、seed run parameters 和 seed workflow。
+  `projection.blocks` 中每个条目还记录它的 seed block label 和 seed selected indices。
+- Projection artifact 必须包含足够的数据来作为后续 adiabatic run 的 seed：
+  block labels、basis states、Fock-coordinate eigenvectors、selected indices、
+  `H_eff` 和 `T11` metrics。
 - `selection_info` 存储方法特定诊断。它可以包含 `greedy_multi` 的紧凑摘要字段；
   详细 trial logs 也可以由 selector 写成 JSONL，但最终 `results.json` 是持久输出。
-- `projection_analysis` 结果使用同样的汇总结构，包含 `projection`，
+- `projection_analysis` 结果使用同样的 family manifest 结构，包含 `projection`，
   但不包含 `operators` 或 `fit`。
-- 未来 LCE/embed workchains 必须从这个汇总 JSON 读取，而不是从文本文件读取。
+- LCE workchains 必须从 `results.json` manifest 以及其引用的 exchange
+  和 cluster-geometry JSON 文件读取，而不是从文本文件读取。
+- LCE 输出写出 `lce_results.json` manifest 以及它引用的
+  `weights/hole{h}_class{c}_idx{v}.json` 文件。每个 weight 文件使用同一套
+  `operators` schema 记录 net couplings。
+- Periodize workchains 必须读取 LCE manifest 以及它引用的 weight 文件。

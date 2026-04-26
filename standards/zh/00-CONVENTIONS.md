@@ -58,28 +58,31 @@ MUST:
 - 规范的运行时工作流参数名为 `workflow`。
 - 标准和实现中不得引入替代规范名称，如
   `ssq`、`s_squared`、`sz` 或 `s`。
-- 唯一允许的模式拼写为：
-  - `full`
-  - `fixed_sz`
-  - `block_sz_full`
-  - `fixed_sz_s2`
-  - `block_sz_s2_full`
-- `MODE=all` 仅作为 `MODE=full` 的输入别名接受。
+- 唯一允许的 CLI `MODE` 拼写为 `full`、`Sz` 和 `SzS2`。
+- `MODE` 只选择对角化分块层级；可选 CLI 参数 `twoSz` 和 `twoS`
+  在该层级内选择具体 block 子集。
 - 规范的运行时路径标记为：
+  - `N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>`
   - `twoSz_<value>`（负值使用 `n` 前缀：`twoSz_n1` 表示 $-1$）
   - `twoS_<value>`（`twoS` 始终非负，无需 `n` 前缀）
-  - `twoSz_all`
-  - `twoSz_all_twoS_all`
-- 遗留名称如 `fixed_sz_ssq`、`block_sz_ssq_full`、`_sz...`、`_s...`、
-  `SZ`、`S`、`S2`、`SZ_IDX`、`S_IDX` 和 `TYPE` 不属于本标准。
+  - `mode_full`
+  - `mode_twoSz`
+  - `mode_twoSz_<value>`
+  - `mode_twoSz_twoS`
+  - `mode_twoSz_<value>_twoS`
+  - `mode_twoSz_<value>_twoS_<value>`
+- 路径里的 `mode_*` token 是输出目录名，不是 CLI `MODE` 输入值。
+- 遗留 CLI 名称如 `fixed_sz`、`block_sz_full`、`fixed_sz_s2`、
+  `fixed_sz_s2_all`、`block_sz_s2_full`、`fixed_sz_ssq`、
+  `block_sz_ssq_full`、`_sz...`、`_s...`、`SZ`、`S`、`S2`、`SZ_IDX`、
+  `S_IDX` 和 `TYPE` 不属于生产 CLI 标准。
 
 Code form:
 ```text
 canonical physics names: twoSz, twoS, S2
 canonical workflow key: workflow
-canonical modes: full, fixed_sz, block_sz_full, fixed_sz_s2, block_sz_s2_full
-MODE input alias: all -> full
-canonical path tokens: twoSz_<value>, twoS_<value>, twoSz_all, twoSz_all_twoS_all
+canonical CLI modes: full, Sz, SzS2
+canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*
 negative value encoding: n prefix (e.g. twoSz_n1 = twoSz = -1)
 ```
 

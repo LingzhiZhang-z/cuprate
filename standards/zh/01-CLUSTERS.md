@@ -83,8 +83,8 @@ MUST:
   Manhattan 距离为 `1` 且 `i < j`。这是 Hubbard 跳跃矩阵使用的键列表。
 - `Cluster.generate_bonds(N=2, is_connected=False)` 返回拟合算符组：
   每个两格点算符对应一个单元素组 `[[i, j]]`。
-- `Cluster.generate_bonds(N=4 or 6, is_connected=True)` 返回连通多格点
-  自旋算符配对的单元素组。
+- `Cluster.generate_bonds(N=4 or 6, is_connected=True)` 每个连通 support 子集
+  返回一个组。每个组包含该 support 上所有完美匹配配对项。
 
 Code form:
 ```python

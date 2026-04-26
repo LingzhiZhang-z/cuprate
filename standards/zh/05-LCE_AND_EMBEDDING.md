@@ -1,6 +1,6 @@
-# 05-LCE 与嵌入
+# 05-LCE 与 Embed
 
-链接团簇展开（子团簇减法）与超胞嵌入。
+链接团簇展开（子团簇减法）与 embed 输出。
 
 ## 1) LCE 目标 (MUST)
 
@@ -20,7 +20,8 @@ $$
 MUST:
 - 对 $N$ 个格点的团簇，枚举大小从 $2$ 到 $N-1$ 的所有连通子图。
 - 连通性基于 NN 邻接（曼哈顿距离 $= 1$）。
-- 每个子图通过加权图同构匹配到已有的团簇计算结果。
+- 每个子图通过 NN 图同构匹配到已有的团簇计算结果。
+- LCE 输入必须包含连续的 `N=2..Nmax` 原始自旋耦合结果。
 
 Code form:
 ```python
@@ -32,11 +33,13 @@ match = find_cluster_match(subgraph, clusters)
 ## 3) 算符减法 (MUST)
 
 MUST:
-- 算符列表结构为：
-  `[常数项, [二格点项], [四格点项], [六格点项], ...]`
-  其中每项为 `[格点索引..., 系数]`。
+- LCE 从 `08-OPERATOR_OUTPUT.md` 中定义的 `results.json` schema 读取
+  fitted operators；不读取文本文件或 projection NPZ 文件。
+- 算符数据包含一个常数项和带 key 的自旋耦合项。
 - 减法通过同构映射将子团簇格点索引映射到父团簇索引，
   然后逐项减去系数。
+- 算符身份由规范 `key` 字段决定，而不是显示用的 `J*`、`K*` 或 `L*`
+  标签。
 
 Code form:
 ```python
@@ -52,40 +55,135 @@ k4s(i, j, k, l)    = sorted([(sorted([i,j]), sorted([k,l]))])
 k6s(i,j,k,l,m,n)   = sorted([(sorted([i,j]), sorted([k,l]), sorted([m,n]))])
 ```
 
-Validation:
-- LCE 后，单格点团簇的净贡献为零（无键）。
-- 对 $C' \subseteq C$ 的所有 $W(C')$ 求和必须恢复 $O(C)$。
-
-## 4) 超胞嵌入 (MUST)
+## 4) LCE 输出 (MUST)
 
 MUST:
-- LCE 净耦合放置到大小为 $N_{\text{cell}} \times N_{\text{cell}}$ 的周期方格子超胞上。
-- 对每个团簇，生成所有对称性不等价的取向（通过 C4v 最多 8 个），
-  然后每个取向在周期边界条件下平移到所有 $N_{\text{cell}}^2$ 个位置。
-- 超胞中的格点索引：`index = x * N_cell + y`，周期边界：`x_pbc = x % N_cell`。
+- LCE 入口写出 `lce_results.json`、`weights/` 下的逐团簇 weight 文件，
+  以及最小 `lce_summary.txt`。
+- `lce_results.json` 的 `result_kind = "lce_spin_couplings"`。
+- `lce_results.json` 是 manifest。它记录运行参数，并为每个具体团簇指向
+  一个 weight 文件。
+- Weight 文件位于 `weights/` 下，命名为 `hole{h}_class{c}_idx{v}.json`。
+- 每个 weight 文件的 `result_kind = "lce_cluster_weight"`。
+- 每个 weight 文件记录 `sites`、`indices`、使用与原始自旋耦合相同
+  operator group schema 的净算符 `W(C)`，以及 reconstruction 诊断。
+
+Manifest form:
+```json
+{
+  "schema_version": 1,
+  "result_kind": "lce_spin_couplings",
+  "weights": [
+    {
+      "N": 4,
+      "hole": 0,
+      "class_idx": 1,
+      "cluster_idx": 0,
+      "weight_file": "weights/hole0_class1_idx0.json"
+    }
+  ]
+}
+```
+
+Weight-file form:
+```json
+{
+  "schema_version": 1,
+  "result_kind": "lce_cluster_weight",
+  "N": 4,
+  "hole": 0,
+  "class_idx": 1,
+  "cluster_idx": 0,
+  "sites": [[0, 0], [1, 0], [0, 1], [1, 1]],
+  "indices": [0, 1, 2, 3],
+  "operators": {"constant_term": {"real": 0.0, "imag": 0.0}, "groups": []},
+  "raw_summary": {},
+  "diagnostics": {
+    "subcluster_count": 0,
+    "reconstruction_error": 0.0,
+    "net_term_count": 0,
+    "max_abs_net_coefficient": 0.0
+  }
+}
+```
+
+Validation:
+- 对每个团簇，所有连通子团簇净贡献 $W(C')$（$C' \subseteq C$）求和
+  必须在 `ATOL["loose"]` 内恢复原始 fitted operators $O(C)$。
+- 对 `N=2`，净算符等于原始算符。
+
+## 5) Embed 输入与输出 (MUST)
+
+MUST:
+- embed 阶段必须读取 `lce_results.json` manifest 以及它引用的
+  weight 文件，而不是原始 `results.json`。
+- 输出位于
+  `ROOT/block_embed/N_{Nmax}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/`
+  下。
+- `embed_results.json` 是 `result_kind = "embedded_spin_couplings"` 的 manifest。
+- `embed_summary.txt` 记录源 LCE 文件和输出数量。
+- `two_site.txt` 包含 `Nmax` 内所有候选二格点键向量；未出现在累积 LCE 输出中的
+  向量写为 `None`。
+- 多格点 cluster 文件命名为 `N{N}_hole{h}_class{c}_idx{i}.txt`。
+- 生产代码使用 `embed`，不是 `periodize`。
+
+Code form:
+```text
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/two_site.txt
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/clusters/N4_hole0_class0_idx0.txt
+```
+
+## 6) Embed 匹配算法 (MUST)
+
+MUST:
+- 数值算法是 target-driven。
+- C4v 只用于生成 parent cluster 的 distinct orientations。
+- target 是 concrete 的。匹配只允许平移；不要旋转、镜像、canonicalize，
+  也不要除以 target multiplicity。
+- 不计算或输出 `m(candidate)`。
+- 不做 L2 orbit averaging，也不建立 `Wtilde` 数值路径。
+- embed 不再做一次 Möbius subtraction。
+
+Code form:
+```text
+for each output target P:
+    value(P) = 0
+    seen(P) = false
+    for each LCE weight W(C):
+        for each distinct C4v orientation g(C):
+            for each term t in W(C) with arity(P):
+                if g(t) matches P by translation only:
+                    value(P) += coeff(t)
+                    seen(P) = true
+```
+
+Validation:
+- Plaquette distinct orientations = 1。
+- Four-site line distinct orientations = 2。
+- L-shape distinct orientations = 8。
+- Synthetic plaquette 中每条 NN two-site term coefficient 设为 `1.0` 时，
+  `two_site.txt[(1,0)] = 2.0`。
+- Synthetic L-tetromino 中每条 NN two-site term coefficient 设为 `1.0` 时，
+  `two_site.txt[(1,0)] = 12.0`。
+
+## 7) Embed 二格点候选顺序 (MUST)
+
+MUST:
+- 二格点候选使用规范向量 `(dx, dy)`，满足 `dx >= dy >= 0` 且 `dx > 0`。
+- 候选向量满足 `dx + dy + 1 <= Nmax`。
+- 排序按 Manhattan shell、距离平方、再按向量字典序。
+- 这样增大 `Nmax` 时只会在末尾增加新的候选 shell，不重排前面的条目。
 
 Code form:
 ```python
-unique_clusters = unique_cluster_transformed(cluster)  # 最多 8 个取向
-indices_pbc = embed_cluster_to_squarecell_pbc(unique_cluster, N_cell)
-embed_operator(couplings_pbc, coupling_net, indices_pbc)
+sorted(candidates, key=lambda v: (v[0] + v[1], v[0]**2 + v[1]**2, v[0], v[1]))
 ```
 
-## 5) 累积耦合结构 (MUST)
+## 8) Embed 多格点文本文件 (MUST)
 
 MUST:
-- 超胞耦合数据结构为：
-  - `couplings[0]`：常数项（标量）。
-  - `couplings[1]`：二格点耦合矩阵（$N_{\text{cell}}^2 \times N_{\text{cell}}^2$，复数）。
-  - `couplings[2]`：四格点耦合（以 `k4s` 元组为键的字典）。
-  - `couplings[3]`：六格点耦合（以 `k6s` 元组为键的字典）。
-  - `couplings[4]`：八格点耦合（以 `k8s` 元组为键的字典）。
-- 二格点耦合进行对称化：`[i,j]` 和 `[j,i]` 均被累加。
-
-## 6) 输出分析 (MUST)
-
-MUST:
-- 二格点耦合按规范键向量分组并按幅值排序。
-- 四格点耦合通过 `normalize_four_sites` 分为 5 种拓扑类型
-  （正方形、T 形、线形变体）。
-- 结果同时以人可读文本和机器可读 JSON 产物写出。
+- 四格点和六格点 embed 文件列出 cluster sites、site indices、
+  所有 perfect pairings 以及每个 pairing 的 coefficient。
+- 缺失的 pairings 写为 `None`。
+- 文件写在 `clusters/` 下。
+- 可以添加简单 text graph section，但 v1 不强制。

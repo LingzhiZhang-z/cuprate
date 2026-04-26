@@ -28,8 +28,8 @@ MUST:
   ```
   data_test/
   └── Block_U{U:.4f}_t{t:.4f}/
-      ├── N{N}/                                     # old MODE=full (TYPE=all)
-      ├── N{N}_sz{Sz:.4f}/                          # old MODE=fixed_sz
+      ├── N{N}/                                     # old full run (TYPE=all)
+      ├── N{N}_sz{Sz:.4f}/                          # old fixed-Sz run
       ├── N{N}_adiabatic_restart/                   # old workflow=adiabatic
       ├── N{N}_multi_restart/                       # old workflow=multi
       ├── N{N}_sz{Sz:.4f}_adiabatic_restart/
@@ -63,7 +63,7 @@ MUST:
 | Old pattern | New equivalent | Translation rule |
 |-------------|----------------|------------------|
 | `Block_U{U}_t{t}` | `U{U}_t{t}` | Strip `Block_` prefix |
-| `N{N}` | `N{N}` (MODE=full) | No change |
+| `N{N}` | `MODE=full` | Full Fock mode |
 | `N{N}_sz{Sz:.4f}` | `N{N}_twoSz_{twoSz}` | `twoSz = int(2 * Sz)` |
 | `N{N}_multi_restart` | workflow `greedy_multi` reference case | Old data name only |
 | `N{N}_adiabatic_restart` | workflow `adiabatic` reference case | Old data name only |
@@ -81,7 +81,7 @@ MUST:
 
 | Old key | New key | Translation |
 |---------|---------|-------------|
-| `TYPE` | `MODE` | `TYPE=all` → `MODE=full`, `TYPE=sz` → `MODE=fixed_sz` |
+| `TYPE` | `MODE` | `TYPE=all` → `MODE=full`, `TYPE=sz` → `MODE=Sz` |
 | `SZ` | `twoSz` | `twoSz = int(2 * SZ)` |
 | `S` | `twoS` | `twoS = int(2 * S)` |
 | `WORKFLOW=multi` | `workflow=greedy_multi` | Test-side translation only |
@@ -141,15 +141,15 @@ MUST:
 |------|-----------|--------|
 | N=2, full | U=1, t=0.24 | Smallest cluster, full diag, baseline |
 | N=4, full | U=1, t=0.24 | 4-site with holes, isomorphic classes |
-| N=4, fixed_sz | U=1, t=0.24, Sz=0 | Sz-blocked mode |
-| N=6, fixed_sz | U=1, t=0.24, Sz=0 | Larger cluster, more sectors |
+| N=4, `MODE=Sz twoSz=0` | U=1, t=0.24 | Sz-blocked mode |
+| N=6, `MODE=Sz twoSz=0` | U=1, t=0.24 | Larger cluster, more sectors |
 | N=4, adiabatic | U=1, t=0.24 | Adiabatic selection (needs t=0.22 as previous) |
 
 ### 5.2) Extended regression set
 
 - All N from 2 to 7 at t=0.24 (one parameter point, all modes).
 - Boundary parameter points: t=0.02 (strong coupling) and t=0.60 (weak coupling).
-- N=8 fixed_sz (largest available, tests scalability).
+- N=8 `MODE=Sz twoSz=0` (largest available, tests scalability).
 
 ## 6) Test Infrastructure (MUST)
 

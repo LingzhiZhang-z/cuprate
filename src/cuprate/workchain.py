@@ -6,17 +6,30 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
 from cuprate.clusters import Cluster, ClusterSets
 from cuprate.hubbard import HubbardModel
+from cuprate.paths import (
+    RESULTS_FILE,
+    STAGE_MAIN,
+    family_clusters_file,
+    family_exchange_file,
+    family_projection_file,
+    main_data_dir,
+    mode_token,
+    parameter_token,
+    workflow_dir,
+    workflow_token,
+)
 from cuprate.mpi import comm, rank, size
+from cuprate.operators import complex_json, operators_from_terms, terms_from_fit
 
 
-RESULT_SCHEMA_VERSION = 2
-SUPPORTED_WORKFLOWS = {"occ", "energy", "greedy", "greedy_multi"}
+RESULT_SCHEMA_VERSION = 5
+SUPPORTED_WORKFLOWS = {"occ", "energy", "greedy", "greedy_multi", "adiabatic"}
 
 
 @dataclass(frozen=True)
@@ -25,15 +38,15 @@ class WorkchainParams:
     U: float
     t: float
     mode: str
+    twoSz: int | None
+    twoS: int | None
     workflow: str
-    output_dir: Path
-    twoSz: int | None = None
-    twoS: int | None = None
+    root: Path
     cache_mode: str = "none"
-    cache_dir: Path | None = None
     ratio: int | None = None
     n_trials: int | None = None
     max_failures: int | None = None
+    seed_results: Path | None = None
 
 
 def run_workchain(params: WorkchainParams) -> dict[str, Any] | None:
@@ -41,12 +54,28 @@ def run_workchain(params: WorkchainParams) -> dict[str, Any] | None:
     if params.workflow not in SUPPORTED_WORKFLOWS:
         raise ValueError(
             f"workflow={params.workflow!r} is not supported in this workchain; "
-            "use one of occ, energy, greedy, greedy_multi"
+            "use one of occ, energy, greedy, greedy_multi, adiabatic"
         )
 
-    output_dir = Path(params.output_dir)
+    seed_context = _load_adiabatic_seed_context(params)
+    output_dir = workflow_dir(
+        params.root,
+        STAGE_MAIN,
+        params.N,
+        params.N,
+        params.U,
+        params.t,
+        params.mode,
+        params.workflow,
+        twoSz=params.twoSz,
+        twoS=params.twoS,
+    )
+    exchanges_dir = output_dir / "exchanges"
+    clusters_dir = output_dir / "clusters"
     artifacts_dir = output_dir / "artifacts"
     output_dir.mkdir(parents=True, exist_ok=True)
+    exchanges_dir.mkdir(parents=True, exist_ok=True)
+    clusters_dir.mkdir(parents=True, exist_ok=True)
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     families = _enumerate_families(params.N) if rank == 0 else None
@@ -54,28 +83,25 @@ def run_workchain(params: WorkchainParams) -> dict[str, Any] | None:
 
     local_entries: list[dict[str, Any]] = []
     for family in families[rank::size]:
-        local_entries.extend(_process_family(params, family, artifacts_dir))
+        local_entries.append(
+            _process_family(params, family, exchanges_dir, clusters_dir, artifacts_dir, seed_context)
+        )
 
     gathered = comm.gather(local_entries, root=0)
     if rank != 0:
         return None
 
     entries = [entry for batch in gathered for entry in batch]
-    entries.sort(key=lambda entry: (entry["hole"], entry["class_idx"], entry["cluster_idx"]))
+    entries.sort(key=lambda entry: (entry["hole"], entry["class_idx"]))
 
     payload = {
         "schema_version": RESULT_SCHEMA_VERSION,
         "result_kind": "spin_couplings",
-        "run_params": _run_params_json(params),
-        "clusters": entries,
+        "complete_family_set": True,
+        "run_params": _run_params_json(params, seed_context),
+        "families": entries,
     }
-    for entry in entries:
-        sidecar = (
-            output_dir
-            / f"hole{entry['hole']}_class{entry['class_idx']}_cluster{entry['cluster_idx']}_results.json"
-        )
-        sidecar.write_text(json.dumps(entry, indent=2) + "\n")
-    (output_dir / "results.json").write_text(json.dumps(payload, indent=2) + "\n")
+    (output_dir / RESULTS_FILE).write_text(json.dumps(payload, indent=2) + "\n")
     return payload
 
 
@@ -90,8 +116,11 @@ def _enumerate_families(N: int) -> list[tuple[tuple[int, int], list[Cluster]]]:
 def _process_family(
     params: WorkchainParams,
     family: tuple[tuple[int, int], list[Cluster]],
+    exchanges_dir: Path,
+    clusters_dir: Path,
     artifacts_dir: Path,
-) -> list[dict[str, Any]]:
+    seed_context: dict[str, Any] | None,
+) -> dict[str, Any]:
     (hole, class_idx), members = family
     representative = members[0]
     family_start = time.perf_counter()
@@ -99,35 +128,54 @@ def _process_family(
     model = HubbardModel(representative, params.U, params.t)
     model.set_symmetry(params.mode, twoSz=params.twoSz, twoS=params.twoS)
     model.build_hamiltonians()
-    cache_dir = params.cache_dir if params.cache_mode != "none" else None
+    cache_dir = (
+        main_data_dir(params.root, params.N, params.N, params.U, params.t, params.mode)
+        if params.cache_mode != "none"
+        else None
+    )
     model.solve(cache_mode=params.cache_mode, cache_dir=cache_dir)
 
-    select_kwargs = _selection_kwargs(params, artifacts_dir, hole, class_idx)
+    select_kwargs = _selection_kwargs(params, artifacts_dir, hole, class_idx, model, seed_context)
     model.project(method=params.workflow, **select_kwargs)
 
-    artifact_name = f"hole{hole}_class{class_idx}_projection.npz"
+    artifact_name = family_projection_file(hole, class_idx)
     artifact_path = artifacts_dir / artifact_name
     _write_projection_npz(artifact_path, model)
     artifact_relpath = str(Path("artifacts") / artifact_name)
 
-    entries: list[dict[str, Any]] = []
-    for member in members:
-        bond_groups = (
-            member.generate_bonds(N=2, is_connected=False)
-            + member.generate_bonds(N=4, is_connected=True)
-            + member.generate_bonds(N=6, is_connected=True)
-        )
-        model.fit(bond_groups=bond_groups)
-        entries.append(
-            _cluster_payload(
-                params=params,
-                cluster=member,
-                model=model,
-                artifact=artifact_relpath,
-                elapsed=time.perf_counter() - family_start,
-            )
-        )
-    return entries
+    bond_groups = _fit_bond_groups(representative)
+    model.fit(bond_groups=bond_groups)
+    constant, terms = terms_from_fit(model.bond_groups, model.coupling_coeffs)
+    elapsed = time.perf_counter() - family_start
+
+    exchange_name = family_exchange_file(hole, class_idx)
+    clusters_name = family_clusters_file(hole, class_idx)
+    exchange_relpath = str(Path("exchanges") / exchange_name)
+    clusters_relpath = str(Path("clusters") / clusters_name)
+
+    exchange_payload = _exchange_payload(
+        params=params,
+        representative=representative,
+        model=model,
+        artifact=artifact_relpath,
+        constant=constant,
+        terms=terms,
+        elapsed=elapsed,
+    )
+    clusters_payload = _clusters_payload(
+        params=params,
+        representative=representative,
+        members=members,
+    )
+    (exchanges_dir / exchange_name).write_text(json.dumps(exchange_payload, indent=2) + "\n")
+    (clusters_dir / clusters_name).write_text(json.dumps(clusters_payload, indent=2) + "\n")
+
+    return {
+        "hole": int(hole),
+        "class_idx": int(class_idx),
+        "exchange_file": exchange_relpath,
+        "clusters_file": clusters_relpath,
+    }
 
 
 def _selection_kwargs(
@@ -135,6 +183,8 @@ def _selection_kwargs(
     artifacts_dir: Path,
     hole: int,
     class_idx: int,
+    model: HubbardModel,
+    seed_context: dict[str, Any] | None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     if params.workflow in {"greedy", "greedy_multi"}:
@@ -148,6 +198,15 @@ def _selection_kwargs(
             kwargs["n_trials"] = params.n_trials
         if params.max_failures is not None:
             kwargs["max_failures"] = params.max_failures
+    if params.workflow == "adiabatic":
+        if seed_context is None:
+            raise ValueError("workflow=adiabatic requires SEED_RESULTS")
+        kwargs["adiabatic_seeds"] = _load_adiabatic_seed_map(
+            seed_context,
+            model,
+            hole,
+            class_idx,
+        )
     return kwargs
 
 
@@ -170,34 +229,51 @@ def _write_projection_npz(path: Path, model: HubbardModel) -> None:
             dtype=float,
         ),
     }
-    for idx, (heff, selected) in enumerate(zip(model.heff, model.selected_indices)):
+    for idx, (block, heff, selected) in enumerate(
+        zip(model.blocks, model.heff, model.selected_indices)
+    ):
         arrays[f"block_{idx}_Heff"] = np.asarray(heff)
         arrays[f"block_{idx}_selected_indices"] = np.asarray(selected, dtype=int)
+        arrays[f"block_{idx}_basis_states"] = np.asarray(block.basis_states, dtype=np.int64)
+        arrays[f"block_{idx}_eigvecs_fock"] = np.asarray(block.eigvecs_fock)
     np.savez_compressed(path, **arrays)
 
 
-def _cluster_payload(
+def _fit_bond_groups(cluster: Cluster) -> list[list[Any]]:
+    return (
+        cluster.generate_bonds(N=2, is_connected=False)
+        + cluster.generate_bonds(N=4, is_connected=True)
+        + cluster.generate_bonds(N=6, is_connected=True)
+    )
+
+
+def _exchange_payload(
     *,
     params: WorkchainParams,
-    cluster: Cluster,
+    representative: Cluster,
     model: HubbardModel,
     artifact: str,
+    constant: complex,
+    terms: dict,
     elapsed: float,
 ) -> dict[str, Any]:
     rel_err, residual, r2 = model.fit_metrics
     t11_norm = max(float(value) for value in model.t11m1_norms)
     overlap = _aggregate_overlap(model.selection_info)
     return {
-        "hole": int(cluster.hole),
-        "class_idx": int(cluster.class_idx),
-        "cluster_idx": int(cluster.cluster_idx),
-        "sites": [[int(x), int(y)] for x, y in cluster.sites],
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "result_kind": "spin_coupling_exchange",
+        "N": int(params.N),
+        "hole": int(representative.hole),
+        "class_idx": int(representative.class_idx),
+        "representative_cluster_idx": int(representative.cluster_idx),
+        "representative_sites": [[int(x), int(y)] for x, y in representative.sites],
         "projection": {
             "method": params.workflow,
             "artifact": artifact,
             "blocks": _projection_blocks(model),
         },
-        "operators": _operators_json(cluster, model.bond_groups, model.coupling_coeffs),
+        "operators": operators_from_terms(representative.sites, constant, terms),
         "fit": {
             "relative_error": float(rel_err),
             "residual": float(residual),
@@ -212,6 +288,32 @@ def _cluster_payload(
     }
 
 
+def _clusters_payload(
+    *,
+    params: WorkchainParams,
+    representative: Cluster,
+    members: list[Cluster],
+) -> dict[str, Any]:
+    return {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "result_kind": "cluster_family_geometry",
+        "N": int(params.N),
+        "hole": int(representative.hole),
+        "class_idx": int(representative.class_idx),
+        "representative_cluster_idx": int(representative.cluster_idx),
+        "representative_sites": [[int(x), int(y)] for x, y in representative.sites],
+        "clusters": [_cluster_geometry_payload(member) for member in members],
+    }
+
+
+def _cluster_geometry_payload(cluster: Cluster) -> dict[str, Any]:
+    return {
+        "cluster_idx": int(cluster.cluster_idx),
+        "sites": [[int(x), int(y)] for x, y in cluster.sites],
+        "indices": list(range(cluster.N)),
+    }
+
+
 def _projection_blocks(model: HubbardModel) -> list[dict[str, Any]]:
     blocks = []
     for block, selected, t11_norm, info in zip(
@@ -221,93 +323,174 @@ def _projection_blocks(model: HubbardModel) -> list[dict[str, Any]]:
         model.selection_info,
     ):
         overlap = _info_overlap(info)
-        blocks.append(
-            {
-                "block": block.label(),
-                "twoSz": None if block.twoSz is None else int(block.twoSz),
-                "twoS": None if block.twoS is None else int(block.twoS),
-                "selected_indices": [int(idx) for idx in selected],
-                "selected_state_count": int(len(selected)),
-                "spin_dim": int(block.spin_dim),
-                "heff_dimension": [int(block.spin_dim), int(block.spin_dim)],
-                "t11_minus_1_norm": float(t11_norm),
-                "overlap": None if overlap is None else float(overlap),
-                "selection_info": _json_ready(info),
-            }
-        )
+        payload = {
+            "block": block.label(),
+            "twoSz": None if block.twoSz is None else int(block.twoSz),
+            "twoS": None if block.twoS is None else int(block.twoS),
+            "selected_indices": [int(idx) for idx in selected],
+            "selected_state_count": int(len(selected)),
+            "spin_dim": int(block.spin_dim),
+            "heff_dimension": [int(block.spin_dim), int(block.spin_dim)],
+            "t11_minus_1_norm": float(t11_norm),
+            "overlap": None if overlap is None else float(overlap),
+            "selection_info": _json_ready(info),
+        }
+        if "adiabatic_seed" in info:
+            payload["adiabatic_seed"] = _json_ready(info["adiabatic_seed"])
+        blocks.append(payload)
     return blocks
 
 
-def _operators_json(
-    cluster: Cluster,
-    bond_groups: list[list[Sequence[int]]],
-    coeffs: list[Any],
-) -> dict[str, Any]:
-    two_site: dict[tuple[int, int], list[dict[str, Any]]] = {}
-    multi_site: dict[int, list[dict[str, Any]]] = {4: [], 6: []}
+def _load_adiabatic_seed_context(params: WorkchainParams) -> dict[str, Any] | None:
+    if params.workflow != "adiabatic":
+        if params.seed_results is not None:
+            raise ValueError("SEED_RESULTS applies only to workflow=adiabatic")
+        return None
+    if params.seed_results is None:
+        raise ValueError("SEED_RESULTS is required when workflow=adiabatic")
 
-    for group, group_coeffs in zip(bond_groups, coeffs[1:]):
-        if not group:
-            continue
-        arity = len(group[0])
-        terms = [
-            {
-                "sites": [int(site) for site in term],
-                "coefficient": _complex_json(coefficient),
-            }
-            for term, coefficient in zip(group, group_coeffs)
-        ]
-        if arity == 2:
-            vector = _bond_vector(cluster, group[0])
-            two_site.setdefault(vector, []).extend(terms)
-        elif arity in multi_site:
-            multi_site[arity].append({"terms": terms})
-        else:
-            raise ValueError(f"Unsupported operator arity: {arity}")
+    seed_path = Path(params.seed_results)
+    if not seed_path.is_file():
+        raise ValueError(f"SEED_RESULTS does not exist: {seed_path}")
+    try:
+        payload = json.loads(seed_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"SEED_RESULTS is not valid JSON: {seed_path}") from exc
 
-    groups: list[dict[str, Any]] = []
-    for label_idx, vector in enumerate(sorted(two_site, key=_vector_sort_key), start=1):
-        groups.append(
-            {
-                "arity": 2,
-                "vector": [int(vector[0]), int(vector[1])],
-                "label": f"J{label_idx}",
-                "terms": two_site[vector],
-            }
+    if payload.get("result_kind") != "spin_couplings":
+        raise ValueError(f"SEED_RESULTS is not a spin_couplings results file: {seed_path}")
+    schema_version = int(payload.get("schema_version", 0))
+    if schema_version != RESULT_SCHEMA_VERSION:
+        raise ValueError(
+            f"SEED_RESULTS schema_version={schema_version} cannot seed adiabatic; "
+            f"regenerate with schema_version={RESULT_SCHEMA_VERSION}"
         )
+    run_params = payload.get("run_params")
+    if not isinstance(run_params, dict):
+        raise ValueError(f"SEED_RESULTS is missing run_params: {seed_path}")
+    seed_workflow = run_params.get("workflow")
+    if seed_workflow not in SUPPORTED_WORKFLOWS:
+        raise ValueError(f"SEED_RESULTS has unsupported workflow={seed_workflow!r}")
 
-    for arity, prefix in ((4, "K"), (6, "L")):
-        for label_idx, group in enumerate(multi_site[arity], start=1):
-            groups.append(
-                {
-                    "arity": arity,
-                    "vector": None,
-                    "label": f"{prefix}{label_idx}",
-                    "terms": group["terms"],
-                }
-            )
+    families = payload.get("families")
+    if not isinstance(families, list):
+        raise ValueError(f"SEED_RESULTS is missing families: {seed_path}")
 
     return {
-        "constant_term": _complex_json(coeffs[0]),
-        "groups": groups,
+        "results_path": seed_path,
+        "results_dir": seed_path.parent,
+        "schema_version": schema_version,
+        "run_params": run_params,
+        "workflow": seed_workflow,
+        "families": families,
     }
 
 
-def _bond_vector(cluster: Cluster, bond: Sequence[int]) -> tuple[int, int]:
-    site1, site2 = int(bond[0]), int(bond[1])
-    dx = abs(cluster.sites[site2][0] - cluster.sites[site1][0])
-    dy = abs(cluster.sites[site2][1] - cluster.sites[site1][1])
-    return tuple(sorted((dx, dy), reverse=True))
+def _load_adiabatic_seed_map(
+    seed_context: dict[str, Any],
+    model: HubbardModel,
+    hole: int,
+    class_idx: int,
+) -> dict[str, dict[str, Any]]:
+    seed_entry = _find_seed_entry(seed_context, hole, class_idx)
+    projection = seed_entry.get("projection")
+    if not isinstance(projection, dict):
+        raise ValueError(f"seed entry hole={hole} class={class_idx} is missing projection")
+    artifact = projection.get("artifact")
+    if not isinstance(artifact, str) or not artifact:
+        raise ValueError(f"seed entry hole={hole} class={class_idx} is missing projection artifact")
+
+    artifact_path = Path(seed_context["results_dir"]) / artifact
+    if not artifact_path.is_file():
+        raise ValueError(f"seed projection artifact does not exist: {artifact_path}")
+
+    with np.load(artifact_path, allow_pickle=False) as data:
+        seed_map = _seed_map_from_npz(data, artifact, artifact_path)
+
+    for block in model.blocks:
+        label = block.label()
+        if label not in seed_map:
+            raise ValueError(
+                f"seed projection artifact {artifact_path} is missing block {label}"
+            )
+        seed = seed_map[label]
+        if seed["basis_states"] != list(block.basis_states):
+            raise ValueError(
+                f"seed basis mismatch for block {label} in {artifact_path}"
+            )
+        eigvecs_previous = seed["eigvecs_previous"]
+        if eigvecs_previous.shape[0] != len(block.basis_states):
+            raise ValueError(
+                f"seed eigvec row count mismatch for block {label} in {artifact_path}"
+            )
+        selected_previous = np.asarray(seed["selected_previous"], dtype=int)
+        if selected_previous.size != block.spin_dim:
+            raise ValueError(
+                f"seed selected count mismatch for block {label}: "
+                f"expected {block.spin_dim}, got {selected_previous.size}"
+            )
+        if selected_previous.size and (
+            selected_previous.min() < 0 or selected_previous.max() >= eigvecs_previous.shape[1]
+        ):
+            raise ValueError(
+                f"seed selected indices are out of range for block {label} in {artifact_path}"
+            )
+    return seed_map
 
 
-def _vector_sort_key(vector: tuple[int, int]) -> tuple[int, int, int]:
-    dx, dy = vector
-    return (dx * dx + dy * dy, dx, dy)
+def _find_seed_entry(seed_context: dict[str, Any], hole: int, class_idx: int) -> dict[str, Any]:
+    matches = [
+        entry
+        for entry in seed_context["families"]
+        if int(entry.get("hole", -1)) == hole and int(entry.get("class_idx", -1)) == class_idx
+    ]
+    if not matches:
+        raise ValueError(f"SEED_RESULTS has no family entry for hole={hole} class={class_idx}")
+    exchange_file = matches[0].get("exchange_file")
+    if not isinstance(exchange_file, str) or not exchange_file:
+        raise ValueError(f"seed family hole={hole} class={class_idx} is missing exchange_file")
+    exchange_path = Path(seed_context["results_dir"]) / exchange_file
+    if not exchange_path.is_file():
+        raise ValueError(f"seed exchange file does not exist: {exchange_path}")
+    return json.loads(exchange_path.read_text())
 
 
-def _complex_json(value: complex) -> dict[str, float]:
-    value = complex(value)
-    return {"real": float(value.real), "imag": float(value.imag)}
+def _seed_map_from_npz(
+    data: np.lib.npyio.NpzFile,
+    artifact: str,
+    artifact_path: Path,
+) -> dict[str, dict[str, Any]]:
+    required = {"n_blocks", "block_labels"}
+    missing = sorted(required - set(data.files))
+    if missing:
+        raise ValueError(f"seed projection artifact {artifact_path} is missing {', '.join(missing)}")
+
+    n_blocks = int(np.asarray(data["n_blocks"]).item())
+    labels = [str(label) for label in np.asarray(data["block_labels"]).tolist()]
+    if len(labels) != n_blocks:
+        raise ValueError(f"seed projection artifact {artifact_path} has inconsistent block labels")
+
+    seed_map: dict[str, dict[str, Any]] = {}
+    for idx, label in enumerate(labels):
+        keys = {
+            "selected_previous": f"block_{idx}_selected_indices",
+            "basis_states": f"block_{idx}_basis_states",
+            "eigvecs_previous": f"block_{idx}_eigvecs_fock",
+        }
+        missing = sorted(key for key in keys.values() if key not in data.files)
+        if missing:
+            raise ValueError(
+                f"seed projection artifact {artifact_path} block {label} is missing "
+                f"{', '.join(missing)}"
+            )
+        seed_map[label] = {
+            "block": label,
+            "artifact": artifact,
+            "selected_previous": np.asarray(data[keys["selected_previous"]], dtype=int),
+            "basis_states": np.asarray(data[keys["basis_states"]], dtype=np.int64).tolist(),
+            "eigvecs_previous": np.asarray(data[keys["eigvecs_previous"]]),
+        }
+    return seed_map
 
 
 def _info_overlap(info: dict[str, Any]) -> float | None:
@@ -340,29 +523,45 @@ def _json_ready(value: Any) -> Any:
     if isinstance(value, np.bool_):
         return bool(value)
     if isinstance(value, complex):
-        return _complex_json(value)
+        return complex_json(value)
     return value
 
 
-def _run_params_json(params: WorkchainParams) -> dict[str, Any]:
+def _run_params_json(
+    params: WorkchainParams,
+    seed_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "N": int(params.N),
+        "nelec": int(params.N),
         "U": float(params.U),
         "T": float(params.t),
         "MODE": params.mode,
+        "twoSz": None if params.twoSz is None else int(params.twoSz),
+        "twoS": None if params.twoS is None else int(params.twoS),
         "workflow": params.workflow,
+        "ROOT": str(params.root),
+        "parameter_token": parameter_token(params.N, params.N, params.U, params.t),
+        "mode_token": mode_token(params.mode, twoSz=params.twoSz, twoS=params.twoS),
+        "workflow_token": workflow_token(params.workflow),
+        "data_dir": str(
+            main_data_dir(params.root, params.N, params.N, params.U, params.t, params.mode)
+        ),
         "CACHE_MODE": params.cache_mode,
     }
-    if params.twoSz is not None:
-        payload["twoSz"] = int(params.twoSz)
-    if params.twoS is not None:
-        payload["twoS"] = int(params.twoS)
-    if params.cache_dir is not None:
-        payload["CACHE_DIR"] = str(params.cache_dir)
     if params.ratio is not None:
         payload["RATIO"] = int(params.ratio)
     if params.n_trials is not None:
         payload["N_TRIALS"] = int(params.n_trials)
     if params.max_failures is not None:
         payload["MAX_FAILURES"] = int(params.max_failures)
+    if params.seed_results is not None:
+        payload["SEED_RESULTS"] = str(params.seed_results)
+    if seed_context is not None:
+        payload["adiabatic_seed"] = {
+            "results": str(seed_context["results_path"]),
+            "schema_version": int(seed_context["schema_version"]),
+            "workflow": str(seed_context["workflow"]),
+            "run_params": _json_ready(seed_context["run_params"]),
+        }
     return payload

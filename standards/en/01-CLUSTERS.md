@@ -85,8 +85,9 @@ MUST:
   hopping matrix.
 - `Cluster.generate_bonds(N=2, is_connected=False)` returns fit-operator groups:
   one singleton group `[[i, j]]` per two-site operator.
-- `Cluster.generate_bonds(N=4 or 6, is_connected=True)` returns singleton
-  groups for connected multi-site spin-operator pairings.
+- `Cluster.generate_bonds(N=4 or 6, is_connected=True)` returns one group per
+  connected support subset. Each group contains all perfect-match pairing terms
+  on that support.
 
 Code form:
 ```python

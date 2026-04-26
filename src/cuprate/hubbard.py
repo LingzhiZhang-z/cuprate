@@ -10,49 +10,9 @@ from scipy.linalg import block_diag
 
 from cuprate.clusters import Cluster
 from cuprate.manifold import Block
+from cuprate.paths import ModeSpec, mode_spec
 from cuprate.sectors import build_S2_multiplets, build_S2_sectors, build_S2_transforms
 from cuprate.states import apply_hop, count_double_occ, generate_states, group_states
-
-MODE_SINGLE = "single"
-MODE_BY_SZ = "by_sz"
-MODE_BY_SZ_S2 = "by_sz_s2"
-MODE_ONE_SZ = "one_sz"
-MODE_ONE_SZ_S2 = "one_sz_s2"
-MODE_ONE_SZ_BY_S2 = "one_sz_by_s2"
-
-MODE_ALIASES = {
-    "full": MODE_SINGLE,
-    "fixed_sz": MODE_ONE_SZ,
-    "block_sz_full": MODE_BY_SZ,
-    "fixed_sz_s2": MODE_ONE_SZ_S2,
-    "block_sz_s2_full": MODE_BY_SZ_S2,
-    "fixed_sz_s2_all": MODE_ONE_SZ_BY_S2,
-}
-
-BUCKET_FULL = "full"
-BUCKET_SZ_BLOCK = "sz_block"
-BUCKET_SZ_S2_BLOCK = "sz_s2_block"
-
-# Each mode = (sz_scope, s2_scope), scope in {"none", "one", "all"}.
-# "none" -> no blocking on that axis (single Fock basis / no S2 transform)
-# "one"  -> fixed value (twoSz or twoS) supplied by caller
-# "all"  -> iterate all possible values in that dimension
-_MODE_SCOPES: dict[str, tuple[str, str]] = {
-    MODE_SINGLE: ("none", "none"),
-    MODE_ONE_SZ: ("one", "none"),
-    MODE_BY_SZ: ("all", "none"),
-    MODE_ONE_SZ_S2: ("one", "one"),
-    MODE_ONE_SZ_BY_S2: ("one", "all"),
-    MODE_BY_SZ_S2: ("all", "all"),
-}
-
-
-def _bucket_for(sz_scope: str, s2_scope: str) -> str:
-    if s2_scope != "none":
-        return BUCKET_SZ_S2_BLOCK
-    if sz_scope != "none":
-        return BUCKET_SZ_BLOCK
-    return BUCKET_FULL
 
 
 class HubbardModel:
@@ -80,13 +40,6 @@ class HubbardModel:
         self.bond_groups: list[list[Sequence[int]]] | None = None
         self.coupling_coeffs: list | None = None
         self.fit_metrics: tuple[float, float, float] | None = None
-
-    def label(self) -> str:
-        def fmt(v: complex) -> str:
-            x = v.real
-            return f"n{-x:.12g}" if x < 0 else f"{x:.12g}"
-
-        return f"N_{self.N}_nelec_{self.nelec}_U_{fmt(self.U)}_t_{fmt(self.t)}"
 
     def build_fock_basis(self, twoSz: int | None = None) -> list[int]:
         return generate_states(self.N, self.nelec, twoSz=twoSz)
@@ -122,20 +75,26 @@ class HubbardModel:
         """Build the full Hubbard Hamiltonian matrix on `basis_states`."""
         return self._build_hamiltonian_t(basis_states) + self._build_hamiltonian_U(basis_states)
 
-    def _validate_mode(self, mode: str, twoSz: int | None, twoS: int | None) -> str:
-        mode = MODE_ALIASES.get(mode.lower(), mode.lower())
-        if mode not in _MODE_SCOPES:
-            raise ValueError(f"Unsupported Hubbard solver mode: {mode}")
-        sz_scope, s2_scope = _MODE_SCOPES[mode]
-        needs_twoSz = sz_scope == "one"
-        needs_twoS = s2_scope == "one"
-        if (twoSz is not None) != needs_twoSz:
-            verb = "requires" if needs_twoSz else "does not accept"
-            raise ValueError(f"mode={mode} {verb} twoSz")
-        if (twoS is not None) != needs_twoS:
-            verb = "requires" if needs_twoS else "does not accept"
-            raise ValueError(f"mode={mode} {verb} twoS")
-        return mode
+    def _validate_mode(
+        self,
+        mode: str,
+        twoSz: int | None,
+        twoS: int | None,
+    ) -> ModeSpec:
+        spec = mode_spec(mode, twoSz=twoSz, twoS=twoS)
+        if spec.twoSz is not None:
+            if abs(spec.twoSz) > self.N:
+                raise ValueError("twoSz must satisfy |twoSz| <= N")
+            if spec.twoSz % 2 != self.nelec % 2:
+                raise ValueError("twoSz parity must match nelec")
+        if spec.twoS is not None:
+            if not (0 <= spec.twoS <= self.N):
+                raise ValueError("twoS must satisfy 0 <= twoS <= N")
+            if spec.twoS % 2 != self.nelec % 2:
+                raise ValueError("twoS parity must match nelec")
+            if abs(spec.twoSz) > spec.twoS:
+                raise ValueError("twoSz and twoS must satisfy |twoSz| <= twoS")
+        return spec
 
     def _twoSz_values(self) -> range:
         lo = max(-self.nelec, self.nelec - 2 * self.N)
@@ -177,14 +136,13 @@ class HubbardModel:
         twoSz: int | None = None,
         twoS: int | None = None,
     ) -> "HubbardModel":
-        mode = self._validate_mode(mode, twoSz, twoS)
-        sz_scope, s2_scope = _MODE_SCOPES[mode]
-        bucket = _bucket_for(sz_scope, s2_scope)
+        spec = self._validate_mode(mode, twoSz, twoS)
+        sz_scope, s2_scope = spec.twoSz_scope, spec.twoS_scope
         transforms = self._s2_transforms() if s2_scope != "none" else None
 
         sz_iter = {
             "none": [None],
-            "one": [twoSz],
+            "one": [spec.twoSz],
             "all": list(self._twoSz_values()),
         }[sz_scope]
 
@@ -192,19 +150,19 @@ class HubbardModel:
             keys = [(tsz, None) for tsz in sz_iter]
         elif s2_scope == "one":
             for tsz in sz_iter:
-                if (tsz, twoS) not in transforms:
+                if (tsz, spec.twoS) not in transforms:
                     raise ValueError(
-                        f"No (twoSz, twoS)=({tsz}, {twoS}) block exists "
+                        f"No (twoSz, twoS)=({tsz}, {spec.twoS}) block exists "
                         f"at N={self.N}, nelec={self.nelec}."
                     )
-            keys = [(tsz, twoS) for tsz in sz_iter]
+            keys = [(tsz, spec.twoS) for tsz in sz_iter]
         else:
             sz_set = set(sz_iter)
             keys = sorted(k for k in transforms if k[0] in sz_set)
 
         self.blocks = [self._make_sector(tsz, ts, transforms) for tsz, ts in keys]
-        self.mode = mode
-        self._bucket = bucket
+        self.mode = spec.mode
+        self._mode_spec = spec
         self._transforms = transforms
         return self
 
@@ -223,7 +181,7 @@ class HubbardModel:
         return self
 
     def _cache_dir(self, cache_dir: str | Path) -> Path:
-        return Path(cache_dir) / self.label() / self.cluster.label() / self._bucket
+        return Path(cache_dir) / self.cluster.label()
 
     def load(self, cache_dir: str | Path) -> "HubbardModel":
         """Load every existing sector from disk; fail instead of partially solving."""
@@ -338,16 +296,17 @@ class HubbardModel:
             )
 
         self.blocks = merged
-        self.mode = MODE_ONE_SZ if len(merged) == 1 else MODE_BY_SZ
-        self._bucket = BUCKET_SZ_BLOCK
+        self.mode = "Sz"
+        self._mode_spec = mode_spec("Sz", twoSz=merged[0].twoSz if len(merged) == 1 else None)
         return self
 
     def merge_by_sz(self) -> "HubbardModel":
         """Merge current sectors into one Fock-coordinate block and overwrite self.blocks."""
         if not getattr(self, "blocks", None):
             raise RuntimeError("call set_symmetry() first")
-        if self.mode != MODE_BY_SZ:
-            raise ValueError(f"merge_by_sz requires mode={MODE_BY_SZ!r}, got {self.mode!r}")
+        spec = getattr(self, "_mode_spec", None)
+        if spec is None or spec.mode != "Sz" or spec.twoSz_scope != "all":
+            raise ValueError("merge_by_sz requires MODE=Sz without fixed twoSz")
 
         sectors = sorted(self.blocks, key=lambda sector: sector.twoSz)
         for sector in sectors:
@@ -375,8 +334,8 @@ class HubbardModel:
                 basis_transform=None,
             )
         ]
-        self.mode = MODE_SINGLE
-        self._bucket = BUCKET_FULL
+        self.mode = "full"
+        self._mode_spec = mode_spec("full")
         return self
 
     def project(
@@ -391,16 +350,40 @@ class HubbardModel:
             if block.eigvals is None or block.eigvecs is None:
                 raise RuntimeError("call solve() first")
 
+        adiabatic_seeds = select_kwargs.pop("adiabatic_seeds", None)
+        if method == "adiabatic" and adiabatic_seeds is None:
+            raise ValueError("method='adiabatic' requires adiabatic_seeds")
+        if method != "adiabatic" and adiabatic_seeds is not None:
+            raise ValueError("adiabatic_seeds applies only to method='adiabatic'")
+
         self.selected_indices = []
         self.selection_info = []
         self.heff = []
         self.t11m1_norms = []
         for block in self.blocks:
+            block_kwargs = dict(select_kwargs)
+            if method == "adiabatic":
+                seed = adiabatic_seeds.get(block.label())
+                if seed is None:
+                    raise ValueError(f"missing adiabatic seed for block {block.label()}")
+                block_kwargs["eigvecs_previous"] = seed["eigvecs_previous"]
+                block_kwargs["selected_previous"] = seed["selected_previous"]
             selected, selection_info = block.selected(
                 method=method,
                 return_info=True,
-                **select_kwargs,
+                **block_kwargs,
             )
+            if method == "adiabatic":
+                selection_info = dict(selection_info)
+                selection_info["method"] = "adiabatic"
+                selection_info["block"] = block.label()
+                selection_info["adiabatic_seed"] = {
+                    "block": seed["block"],
+                    "artifact": seed["artifact"],
+                    "selected_indices": [
+                        int(idx) for idx in np.asarray(seed["selected_previous"], dtype=int)
+                    ],
+                }
             heff, t11m1_norm = block.downfold(selected)
             self.selected_indices.append(selected)
             self.selection_info.append(selection_info)
@@ -412,7 +395,7 @@ class HubbardModel:
         self,
         bond_groups: list[list[Sequence[int]]] | None = None,
     ) -> "HubbardModel":
-        """Fit projected Heff blocks to spin-coupling operators."""
+        """Fit projected Heff blocks to grouped spin-coupling operators."""
         if self.heff is None:
             raise RuntimeError("call project() first")
         if len(self.heff) != len(self.blocks):

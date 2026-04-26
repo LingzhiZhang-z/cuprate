@@ -90,30 +90,32 @@ MUST:
 
 Code form:
 ```python
-model.merge_by_s2()  # block_sz_s2_full -> block_sz_full frame
-model.merge_by_sz()  # block_sz_full -> full frame
+model.merge_by_s2()  # SzS2 -> Sz frame
+model.merge_by_sz()  # Sz -> full frame
 ```
 
 Validation:
 - 重构的本征值数量必须等于完整 Hilbert 空间维度 $\binom{2N}{N}$。
 
-## 6) 五种对角化模式 (MUST)
+## 6) 对角化模式 (MUST)
 
 MUST:
-- 代码支持恰好五种模式：
+- 代码支持恰好三种 `MODE` 值，以及可选 block selector：
 
-| 模式 | 可选合并前的块 | 可选重构 |
-|------|----------------|----------|
-| `full` | 一个完整 Fock 块 | 不适用 |
-| `fixed_sz` | 一个固定 `twoSz` 块 | 否 |
-| `block_sz_full` | 所有固定 `twoSz` 块 | `merge_by_sz()` |
-| `fixed_sz_s2` | 一个固定 `(twoSz,twoS)` 块 | 否 |
-| `block_sz_s2_full` | 所有固定 `(twoSz,twoS)` 块 | 先 `merge_by_s2()`，再 `merge_by_sz()` |
+| CLI 输入 | 可选合并前的块 | 可选重构 |
+|----------|----------------|----------|
+| `MODE=full` | 一个完整 Fock 块 | 不适用 |
+| `MODE=Sz twoSz=<value>` | 一个固定 `twoSz` 块 | 否 |
+| `MODE=Sz` | 所有固定 `twoSz` 块 | `merge_by_sz()` |
+| `MODE=SzS2 twoSz=<value> twoS=<value>` | 一个固定 `(twoSz,twoS)` 块 | 否 |
+| `MODE=SzS2 twoSz=<value>` | 固定 `twoSz` 下的所有 `twoS` 块 | 可选 `merge_by_s2()` |
+| `MODE=SzS2` | 所有固定 `(twoSz,twoS)` 块 | 先 `merge_by_s2()`，再 `merge_by_sz()` |
 
 - Projection 和 spin fitting 都在当前 `Block` 坐标框架内逐块执行。
-  `fixed_sz_s2` 本身不禁止拟合；调用者负责选择能回答目标物理问题的块框架。
+  S2 分辨的模式本身不禁止拟合；调用者负责选择能回答目标物理问题的块框架。
+- 固定 `twoSz` 和 `twoS` 数值是独立可选 selector，不编码在 `MODE` 里。
 
 Code form:
 ```python
-model.set_symmetry(mode, twoSz=twoSz, twoS=twoS)
+model.set_symmetry("SzS2", twoSz=0, twoS=0)
 ```

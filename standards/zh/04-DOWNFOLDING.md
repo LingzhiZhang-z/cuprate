@@ -58,8 +58,8 @@ MUST:
 - `greedy_multi` 可以通过 `selection_info_path` 或 `info_callback`
   为每个 block/trial 写一条 JSONL 记录。
 - `adiabatic` 需要显式传入同一 block 框架的 `eigvecs_previous` 和
-  `selected_previous` 数组。从前一参数点加载这些数组是 workchain 的责任，
-  不是 `Block` 的责任。
+  `selected_previous` 数组。从显式 `SEED_RESULTS` 的 projection artifact
+  加载这些数组是 workchain 的责任，不是 `Block` 的责任。
 - 如果缺少 adiabatic 种子数据，workchain 必须直接失败，除非用户请求的是其他选择方法。
   不能静默回退到同参数基线运行。
 
