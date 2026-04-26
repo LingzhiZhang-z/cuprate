@@ -95,45 +95,73 @@ MUST:
 ## 5) Human-Readable Output (MUST)
 
 MUST:
-- File name: `hole{h}_class{c}_cluster{v}_results.txt`.
-- Structure:
+- Human-readable text files are sidecars for inspection only. LCE/embed and
+  adiabatic seed loading must continue to read the JSON/NPZ machine outputs.
+- Exchange text file name: `exchanges/hole{h}_class{c}_exchange.txt`.
+- Cluster text file name: `clusters/hole{h}_class{c}_clusters.txt`.
+- LCE weight text file name:
+  `weights/hole{h}_class{c}_idx{v}.txt`.
+- Embed text files are `two_site.txt` plus optional files under
+  `clusters/`.
+- Exchange text structure:
   ```
-  === Summary ===
-  Hole: {h}  Class: {c}  Cluster: {v}
-  N={N}  Sites: (x0,y0) (x1,y1) ...
-  R²: {r_squared}  |T11-I|: {t11m1_norm}  Overlap: {overlap}
+  Family: hole={h} class={c} representative={v}
+  N={N}
+  Sites: 0:(x0,y0)  1:(x1,y1) ...
 
-  === Two-site couplings ===
-  J1  vector (dx,dy):
-      Sites i-j  (xi,yi)-(xj,yj):  {coefficient}
-      ...
+  Projection:
+    method={workflow} artifact={projection_npz}
+    block={block} twoSz={twoSz|all} twoS={twoS|all} spin_dim={d} selected={d}
+      selected_indices=...
 
-  === Four-site couplings ===
-  Group K1: sites {a, b, c, d}
-      (Sa·Sb)(Sc·Sd):  {coefficient}
-      (Sa·Sc)(Sb·Sd):  {coefficient}
-      (Sa·Sd)(Sb·Sc):  {coefficient}
+  Fit:
+    R2={r_squared} relative_error={rel_err} residual={residual}
+    |T11-I|={t11m1_norm} overlap={overlap}
+    constant={c0}
 
-  === Six-site couplings ===
-  Group L1: sites {a, b, c, d, e, f}
-      (Sa·Sb)(Sc·Sd)(Se·Sf):  {coefficient}
-      ...
+  Couplings:
+    J1  vector=(dx,dy)
+      (S0.S1) sites=0-1 coords=(x0,y0)-(x1,y1) coefficient={coefficient}
+    K1  support=0,1,2,3 coords=0:(x0,y0) ...
+      (S0.S1)(S2.S3) sites=0-1 2-3 coords=... coefficient={coefficient}
+  ```
+- Cluster text structure:
+  ```
+  Family: hole={h} class={c} representative={v}
+  N={N}
+  Representative sites: 0:(x0,y0)  1:(x1,y1) ...
 
-  === Fit quality ===
-  Constant term:   {c0}
-  Relative error:  {rel_err}
-  Residual:        {residual}
-  R²:              {r_squared}
-  |T11-I|:         {t11m1_norm}
-  Overlap:         {overlap}
+  Clusters:
+    cluster {cluster_idx}:
+      {operator_index} -> ({x},{y})
+  ```
+- LCE weight text structure:
+  ```
+  LCE weight: N={N} hole={h} class={c} cluster={v}
+  Sites: 0:(x0,y0)  1:(x1,y1) ...
+
+  Diagnostics:
+    subclusters={count}
+    reconstruction_error={error}
+
+  Raw summary:
+    term_count={count}
+    constant={raw_c0}
+
+  Net couplings:
+    constant={net_c0}
+
+  Couplings:
+    J1  vector=(dx,dy)
+      (S0.S1) sites=0-1 coords=(x0,y0)-(x1,y1) coefficient={coefficient}
   ```
 - Formatting rules:
-  - Summary block appears first so key metrics are visible without scrolling.
-  - Coefficients are real floats; imaginary parts are validated in code, not printed.
+  - Summary lines appear first so key metrics are visible without scrolling.
+  - Coefficients are printed as real floats when the imaginary part is negligible.
   - Bond directions not present in the cluster are omitted (no placeholder lines).
   - Multi-site groups are labelled `K1`, `K2`, ... and `L1`, `L2`, ... in canonical group order.
   - Multi-site pairings are listed in canonical order (§3) with explicit
-    operator notation `(Si·Sj)(Sk·Sl)`.
+    operator notation `(Si.Sj)(Sk.Sl)`.
   - Small quantities use scientific notation (`1.23e-7` not `0.0000001230`).
   - `projection_analysis` text output reuses the same operator-group order for
     bond-structure listings, but omits coupling coefficients.
@@ -298,5 +326,7 @@ MUST:
 - LCE output writes an `lce_results.json` manifest plus referenced
   `weights/hole{h}_class{c}_idx{v}.json` files. Each weight file uses this
   same `operators` schema for net couplings.
+- Each LCE weight JSON may have a text sidecar with the same stem. The text
+  file is not an input to downstream stages.
 - Embed workchains must read the LCE manifest and its referenced weight
   files.

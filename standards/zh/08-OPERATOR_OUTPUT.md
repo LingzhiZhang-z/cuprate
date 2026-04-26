@@ -88,45 +88,71 @@ MUST:
 ## 5) 人类可读输出 (MUST)
 
 MUST:
-- 文件名：`hole{h}_class{c}_cluster{v}_results.txt`。
-- 结构：
+- 人类可读文本文件只是检查用 sidecar。LCE/embed 和 adiabatic seed 加载必须继续
+  读取 JSON/NPZ 机器输出。
+- Exchange 文本文件名：`exchanges/hole{h}_class{c}_exchange.txt`。
+- Cluster 文本文件名：`clusters/hole{h}_class{c}_clusters.txt`。
+- LCE weight 文本文件名：`weights/hole{h}_class{c}_idx{v}.txt`。
+- Embed 文本文件为 `two_site.txt` 以及可选的 `clusters/` 下文件。
+- Exchange 文本结构：
   ```
-  === Summary ===
-  Hole: {h}  Class: {c}  Cluster: {v}
-  N={N}  Sites: (x0,y0) (x1,y1) ...
-  R²: {r_squared}  |T11-I|: {t11m1_norm}  Overlap: {overlap}
+  Family: hole={h} class={c} representative={v}
+  N={N}
+  Sites: 0:(x0,y0)  1:(x1,y1) ...
 
-  === Two-site couplings ===
-  J1  vector (dx,dy):
-      Sites i-j  (xi,yi)-(xj,yj):  {coefficient}
-      ...
+  Projection:
+    method={workflow} artifact={projection_npz}
+    block={block} twoSz={twoSz|all} twoS={twoS|all} spin_dim={d} selected={d}
+      selected_indices=...
 
-  === Four-site couplings ===
-  Group K1: sites {a, b, c, d}
-      (Sa·Sb)(Sc·Sd):  {coefficient}
-      (Sa·Sc)(Sb·Sd):  {coefficient}
-      (Sa·Sd)(Sb·Sc):  {coefficient}
+  Fit:
+    R2={r_squared} relative_error={rel_err} residual={residual}
+    |T11-I|={t11m1_norm} overlap={overlap}
+    constant={c0}
 
-  === Six-site couplings ===
-  Group L1: sites {a, b, c, d, e, f}
-      (Sa·Sb)(Sc·Sd)(Se·Sf):  {coefficient}
-      ...
+  Couplings:
+    J1  vector=(dx,dy)
+      (S0.S1) sites=0-1 coords=(x0,y0)-(x1,y1) coefficient={coefficient}
+    K1  support=0,1,2,3 coords=0:(x0,y0) ...
+      (S0.S1)(S2.S3) sites=0-1 2-3 coords=... coefficient={coefficient}
+  ```
+- Cluster 文本结构：
+  ```
+  Family: hole={h} class={c} representative={v}
+  N={N}
+  Representative sites: 0:(x0,y0)  1:(x1,y1) ...
 
-  === Fit quality ===
-  Constant term:   {c0}
-  Relative error:  {rel_err}
-  Residual:        {residual}
-  R²:              {r_squared}
-  |T11-I|:         {t11m1_norm}
-  Overlap:         {overlap}
+  Clusters:
+    cluster {cluster_idx}:
+      {operator_index} -> ({x},{y})
+  ```
+- LCE weight 文本结构：
+  ```
+  LCE weight: N={N} hole={h} class={c} cluster={v}
+  Sites: 0:(x0,y0)  1:(x1,y1) ...
+
+  Diagnostics:
+    subclusters={count}
+    reconstruction_error={error}
+
+  Raw summary:
+    term_count={count}
+    constant={raw_c0}
+
+  Net couplings:
+    constant={net_c0}
+
+  Couplings:
+    J1  vector=(dx,dy)
+      (S0.S1) sites=0-1 coords=(x0,y0)-(x1,y1) coefficient={coefficient}
   ```
 - 格式规则：
-  - 摘要块放在最前面，打开文件即可看到关键指标。
-  - 系数为实数浮点数；虚部在代码内校验，不输出到文件。
+  - 摘要行放在最前面，打开文件即可看到关键指标。
+  - 当虚部可忽略时，系数打印为实数浮点数。
   - 团簇中不存在的键方向不输出（无占位行）。
   - 多格点组按规范组顺序标为 `K1`、`K2`、... 和 `L1`、`L2`、...。
   - 多格点配对按规范排序（§3）列出，
-    使用显式算符记号 `(Si·Sj)(Sk·Sl)`。
+    使用显式算符记号 `(Si.Sj)(Sk.Sl)`。
   - 小量使用科学记号（`1.23e-7` 而非 `0.0000001230`）。
   - `projection_analysis` 的文本输出也复用同一套算符组顺序，只是不打印耦合系数。
 
@@ -285,4 +311,5 @@ MUST:
 - LCE 输出写出 `lce_results.json` manifest 以及它引用的
   `weights/hole{h}_class{c}_idx{v}.json` 文件。每个 weight 文件使用同一套
   `operators` schema 记录 net couplings。
-- Periodize workchains 必须读取 LCE manifest 以及它引用的 weight 文件。
+- 每个 LCE weight JSON 可以有一个同 stem 的文本 sidecar。该文本文件不是下游阶段的输入。
+- Embed workchains 必须读取 LCE manifest 以及它引用的 weight 文件。

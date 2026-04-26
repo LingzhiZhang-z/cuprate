@@ -8,38 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from cuprate.cli import COMMON_KEYS, parse_common_runtime, parse_key_values
 from cuprate.clusters import Cluster, ClusterSets, POINT_GROUP_OPERATIONS, transform
+from cuprate.io import LCE_SCHEMA_VERSION, LCE_WEIGHT_SCHEMA_VERSION, write_embed_outputs
 from cuprate.operators import OperatorKey, canonical_operator_key, operators_to_terms
 from cuprate.paths import (
-    EMBED_CLUSTERS_DIR,
-    EMBED_RESULTS_FILE,
-    EMBED_SUMMARY_FILE,
-    EMBED_TWO_SITE_FILE,
     LCE_RESULTS_FILE,
     STAGE_EMBED,
     STAGE_LCE,
     embed_cluster_file,
-    mode_spec,
-    mode_token,
-    parameter_token,
     workflow_dir,
-    workflow_token,
 )
-
-
-EMBED_SCHEMA_VERSION = 1
-REQUIRED_KEYS = {"ROOT", "N", "U", "T", "MODE", "workflow"}
-CANONICAL_KEYS = {
-    "root": "ROOT",
-    "n": "N",
-    "u": "U",
-    "t": "T",
-    "mode": "MODE",
-    "twosz": "twoSz",
-    "twos": "twoS",
-    "workflow": "workflow",
-}
-SUPPORTED_WORKFLOWS = {"occ", "energy", "greedy", "greedy_multi", "adiabatic"}
 
 
 @dataclass(frozen=True)
@@ -81,77 +60,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def parse_args(argv: list[str]) -> EmbedParams:
-    raw: dict[str, str] = {}
-    for arg in argv:
-        if "=" not in arg:
-            raise ValueError(f"expected KEY=VALUE argument, got {arg!r}")
-        key, value = arg.split("=", 1)
-        canonical = CANONICAL_KEYS.get(key.lower())
-        if canonical is None:
-            raise ValueError(f"unknown parameter {key!r}")
-        if canonical in raw:
-            raise ValueError(f"duplicate parameter {canonical}")
-        raw[canonical] = value
-
-    missing = sorted(REQUIRED_KEYS - raw.keys())
-    if missing:
-        raise ValueError(f"missing required parameter(s): {', '.join(missing)}")
-
-    N = _parse_int(raw["N"], "N")
-    U = _parse_float(raw["U"], "U")
-    t = _parse_float(raw["T"], "T")
-    twoSz = _parse_optional_int(raw, "twoSz")
-    twoS = _parse_optional_int(raw, "twoS")
-    spec = mode_spec(raw["MODE"], twoSz=twoSz, twoS=twoS)
-    workflow = raw["workflow"].lower()
-    if workflow not in SUPPORTED_WORKFLOWS:
-        raise ValueError(f"unsupported workflow={raw['workflow']!r}")
-    _validate_mode_args(N, spec)
+    raw = parse_key_values(argv, COMMON_KEYS)
+    common = parse_common_runtime(raw)
     return EmbedParams(
-        root=Path(raw["ROOT"]),
-        N=N,
-        U=U,
-        t=t,
-        mode=spec.mode,
-        twoSz=spec.twoSz,
-        twoS=spec.twoS,
-        workflow=workflow,
+        root=common.root,
+        N=common.N,
+        U=common.U,
+        t=common.t,
+        mode=common.mode,
+        twoSz=common.twoSz,
+        twoS=common.twoS,
+        workflow=common.workflow,
     )
-
-
-def _parse_int(value: str, key: str) -> int:
-    try:
-        return int(value)
-    except ValueError as exc:
-        raise ValueError(f"{key} must be an integer") from exc
-
-
-def _parse_float(value: str, key: str) -> float:
-    try:
-        return float(value)
-    except ValueError as exc:
-        raise ValueError(f"{key} must be a float") from exc
-
-
-def _parse_optional_int(raw: dict[str, str], key: str) -> int | None:
-    if key not in raw:
-        return None
-    return _parse_int(raw[key], key)
-
-
-def _validate_mode_args(N: int, spec) -> None:
-    if spec.twoSz is not None:
-        if abs(spec.twoSz) > N:
-            raise ValueError("twoSz must satisfy |twoSz| <= N")
-        if spec.twoSz % 2 != N % 2:
-            raise ValueError("twoSz parity must match N")
-    if spec.twoS is not None:
-        if not (0 <= spec.twoS <= N):
-            raise ValueError("twoS must satisfy 0 <= twoS <= N")
-        if spec.twoS % 2 != N % 2:
-            raise ValueError("twoS parity must match N")
-        if spec.twoSz is not None and abs(spec.twoSz) > spec.twoS:
-            raise ValueError("twoSz and twoS must satisfy |twoSz| <= twoS")
 
 
 def run_embed(params: EmbedParams) -> dict[str, Any]:
@@ -174,30 +94,19 @@ def run_embed(params: EmbedParams) -> dict[str, Any]:
         twoSz=params.twoSz,
         twoS=params.twoS,
     )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    clusters_dir = output_dir / EMBED_CLUSTERS_DIR
-    clusters_dir.mkdir(parents=True, exist_ok=True)
 
     two_site_entries = _two_site_entries(params.N, records, orientation_cache)
-    (output_dir / EMBED_TWO_SITE_FILE).write_text(
-        _two_site_text(lce_path, params.N, two_site_entries) + "\n"
+    cluster_outputs = _multi_site_cluster_outputs(params.N, records, orientation_cache)
+    return write_embed_outputs(
+        output_dir=output_dir,
+        params=params,
+        source_lce_path=lce_path,
+        lce_manifest=lce_manifest,
+        records=records,
+        orientation_cache=orientation_cache,
+        two_site_entries=two_site_entries,
+        cluster_outputs=cluster_outputs,
     )
-
-    cluster_files = _write_multi_site_clusters(clusters_dir, params.N, records, orientation_cache)
-    payload = _manifest_payload(
-        params,
-        lce_path,
-        lce_manifest,
-        records,
-        orientation_cache,
-        cluster_files,
-        two_site_entries,
-    )
-    (output_dir / EMBED_RESULTS_FILE).write_text(json.dumps(payload, indent=2) + "\n")
-    (output_dir / EMBED_SUMMARY_FILE).write_text(
-        _summary_text(payload, lce_path, records, orientation_cache) + "\n"
-    )
-    return payload
 
 
 def _lce_manifest_path(params: EmbedParams) -> Path:
@@ -224,8 +133,8 @@ def _load_lce_weights(path: Path) -> tuple[dict[str, Any], list[WeightRecord]]:
     manifest = json.loads(path.read_text())
     if manifest.get("result_kind") != "lce_spin_couplings":
         raise ValueError(f"{path} is not an lce_spin_couplings manifest")
-    if int(manifest.get("schema_version", 0)) != 1:
-        raise ValueError(f"{path} must use lce schema_version=1")
+    if int(manifest.get("schema_version", 0)) != LCE_SCHEMA_VERSION:
+        raise ValueError(f"{path} must use lce schema_version={LCE_SCHEMA_VERSION}")
 
     weights = manifest.get("weights")
     if not isinstance(weights, list):
@@ -242,8 +151,11 @@ def _load_lce_weights(path: Path) -> tuple[dict[str, Any], list[WeightRecord]]:
         weight = json.loads(weight_path.read_text())
         if weight.get("result_kind") != "lce_cluster_weight":
             raise ValueError(f"{weight_path} is not an lce_cluster_weight file")
-        if int(weight.get("schema_version", 0)) != 1:
-            raise ValueError(f"{weight_path} must use lce weight schema_version=1")
+        if int(weight.get("schema_version", 0)) != LCE_WEIGHT_SCHEMA_VERSION:
+            raise ValueError(
+                f"{weight_path} must use lce weight "
+                f"schema_version={LCE_WEIGHT_SCHEMA_VERSION}"
+            )
 
         _, terms = operators_to_terms(weight["operators"])
         records.append(
@@ -322,13 +234,12 @@ def _two_site_vectors(Nmax: int) -> list[tuple[int, int]]:
     )
 
 
-def _write_multi_site_clusters(
-    clusters_dir: Path,
+def _multi_site_cluster_outputs(
     Nmax: int,
     records: list[WeightRecord],
     orientation_cache: dict[tuple[int, int, int, int], list[tuple[tuple[int, int], ...]]],
 ) -> list[dict[str, Any]]:
-    cluster_files = []
+    outputs = []
     for N in (4, 6):
         if N > Nmax:
             continue
@@ -348,17 +259,19 @@ def _write_multi_site_clusters(
                 _accumulate_target(cluster.sites, key, records, orientation_cache)
                 for key in pairings
             ]
-            (clusters_dir / file_name).write_text(_cluster_text(cluster, pairings, values) + "\n")
-            cluster_files.append(
+            outputs.append(
                 {
                     "N": int(N),
                     "hole": int(cluster.hole),
                     "class_idx": int(cluster.class_idx),
                     "cluster_idx": int(cluster.cluster_idx),
-                    "file": f"{EMBED_CLUSTERS_DIR}/{file_name}",
+                    "file_name": file_name,
+                    "sites": cluster.sites,
+                    "pairings": pairings,
+                    "values": values,
                 }
             )
-    return cluster_files
+    return outputs
 
 
 def _target_pairings(cluster: Cluster) -> list[OperatorKey]:
@@ -423,151 +336,6 @@ def _matches_by_translation(
         if canonical_operator_key(sites) == target_key:
             return True
     return False
-
-
-def _two_site_text(
-    source_lce_path: Path,
-    Nmax: int,
-    entries: list[dict[str, Any]],
-) -> str:
-    lines = [
-        "# two-site embedded couplings",
-        f"# source: {source_lce_path}",
-        f"# Nmax: {Nmax}",
-        "# columns: index vector real imag",
-        "",
-    ]
-    for entry in entries:
-        vector = entry["vector"]
-        value = entry["value"]
-        prefix = f"{entry['index']}  ({vector[0]},{vector[1]})"
-        if value is None:
-            lines.append(f"{prefix}  None")
-        else:
-            lines.append(f"{prefix}  {_format_complex(value)}")
-    return "\n".join(lines)
-
-
-def _cluster_text(
-    cluster: Cluster,
-    pairings: list[OperatorKey],
-    values: list[complex | None],
-) -> str:
-    lines = [
-        "sites: " + " ".join(f"({x},{y})" for x, y in cluster.sites),
-        "indices: " + " ".join(str(index) for index in range(cluster.N)),
-        "",
-    ]
-    for key, value in zip(pairings, values):
-        label = "".join(f"(S{i} S{j})" for i, j in key)
-        if value is None:
-            lines.append(f"{label}  None")
-        else:
-            lines.append(f"{label}  {_format_complex(value)}")
-    return "\n".join(lines)
-
-
-def _format_complex(value: complex) -> str:
-    value = complex(value)
-    return f"{value.real:.12e}  {value.imag:.12e}"
-
-
-def _manifest_payload(
-    params: EmbedParams,
-    source_lce_path: Path,
-    lce_manifest: dict[str, Any],
-    records: list[WeightRecord],
-    orientation_cache: dict[tuple[int, int, int, int], list[tuple[tuple[int, int], ...]]],
-    cluster_files: list[dict[str, Any]],
-    two_site_entries: list[dict[str, Any]],
-) -> dict[str, Any]:
-    cluster_file_counts: dict[str, int] = {}
-    for entry in cluster_files:
-        key = f"N{entry['N']}"
-        cluster_file_counts[key] = cluster_file_counts.get(key, 0) + 1
-
-    return {
-        "schema_version": EMBED_SCHEMA_VERSION,
-        "result_kind": "embedded_spin_couplings",
-        "source_lce_manifest": str(source_lce_path),
-        "source_lce_schema_version": int(lce_manifest.get("schema_version", 0)),
-        "run_params": {
-            "U": float(params.U),
-            "T": float(params.t),
-            "N": int(params.N),
-            "Nmax": int(params.N),
-            "nelec": int(params.N),
-            "MODE": params.mode,
-            "twoSz": params.twoSz,
-            "twoS": params.twoS,
-            "workflow": params.workflow,
-            "ROOT": str(params.root),
-            "parameter_token": parameter_token(params.N, params.N, params.U, params.t),
-            "mode_token": mode_token(params.mode, twoSz=params.twoSz, twoS=params.twoS),
-            "workflow_token": workflow_token(params.workflow),
-        },
-        "two_site_file": EMBED_TWO_SITE_FILE,
-        "cluster_files": cluster_files,
-        "diagnostics": {
-            "weights_read": int(len(records)),
-            "two_site_candidate_count": int(len(two_site_entries)),
-            "cluster_file_counts": cluster_file_counts,
-            "orientation_counts": [
-                {
-                    "N": record.N,
-                    "hole": record.hole,
-                    "class_idx": record.class_idx,
-                    "cluster_idx": record.cluster_idx,
-                    "weight_file": record.weight_file,
-                    "distinct_orientations": len(orientation_cache[record.identity()]),
-                }
-                for record in records
-            ],
-        },
-    }
-
-
-def _summary_text(
-    payload: dict[str, Any],
-    source_lce_path: Path,
-    records: list[WeightRecord],
-    orientation_cache: dict[tuple[int, int, int, int], list[tuple[tuple[int, int], ...]]],
-) -> str:
-    run_params = payload["run_params"]
-    diagnostics = payload["diagnostics"]
-    lines = [
-        "Embed summary",
-        f"schema_version: {payload['schema_version']}",
-        f"source_lce_manifest: {source_lce_path}",
-        f"Nmax: {run_params['Nmax']}",
-        f"U: {run_params['U']:.12g}",
-        f"T: {run_params['T']:.12g}",
-        f"MODE: {run_params['MODE']}",
-        f"twoSz: {run_params['twoSz']}",
-        f"twoS: {run_params['twoS']}",
-        f"workflow: {run_params['workflow']}",
-        f"weights_read: {diagnostics['weights_read']}",
-        f"two_site_candidate_count: {diagnostics['two_site_candidate_count']}",
-        "cluster_file_counts: "
-        + ", ".join(
-            f"{key}={value}" for key, value in sorted(diagnostics["cluster_file_counts"].items())
-        ),
-        "",
-        "Distinct parent orientations:",
-    ]
-    for record in records:
-        lines.append(
-            "N={N} hole={hole} class={class_idx} cluster={cluster_idx} "
-            "weight_file={weight_file} orientations={count}".format(
-                N=record.N,
-                hole=record.hole,
-                class_idx=record.class_idx,
-                cluster_idx=record.cluster_idx,
-                weight_file=record.weight_file,
-                count=len(orientation_cache[record.identity()]),
-            )
-        )
-    return "\n".join(lines)
 
 
 def _term_sort_key(

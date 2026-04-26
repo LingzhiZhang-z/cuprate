@@ -57,6 +57,7 @@ MUST:
 | `partial` | 加载已有 block，并求解/保存缺失 block |
 
 - `load`、`save` 和 `partial` 需要 `cache_dir`；`none` 禁止传入 `cache_dir`。
+- runtime/workchain 调用方默认 `CACHE_MODE` 为 `save`。
 - `HubbardModel.save(cache_dir)` 和 `Block.save(cache)` 必须写出同一种已求解 block 格式。
 
 Code form:
@@ -111,29 +112,36 @@ MUST:
   `H_eff` 和 `T11` 指标。
 - Fit 输出包含 family-level coefficients 和 fit metrics。
 - workchain/result-output 层拥有派生输出的写入职责。
+- `cuprate.io` 拥有 main、LCE 和 embed 输出的持久 payload 构造、
+  schema-version 常量、JSON/NPZ 写出，以及人类可读文本 sidecar 写出职责。
 - `Block` 拥有局部计算和可选 selection JSONL logging，但不拥有持久化结果 schema。
 - 规范 JSON 形状定义在 `08-OPERATOR_OUTPUT.md`。
 
-## 7) 未来 CLI 参数 (MUST)
+## 7) 运行时 CLI 参数 (MUST)
 
 MUST:
-- CLI 参数一旦重新引入，就通过 `KEY=VALUE` 传递。
+- CLI 参数通过 `KEY=VALUE` 传递。
+- `cuprate.cli` 拥有 `cuprate.main`、`cuprate.lce` 和 `cuprate.embed`
+  共享的 `KEY=VALUE` 解析、公共默认值，以及公共 `MODE`/`twoSz`/`twoS`
+  校验。
 - CLI 键不区分大小写。
 - 规范 key 包括：
   - `N`、`U`、`T`：物理参数。
-  - `MODE`：`full`、`Sz` 或 `SzS2` 之一。
+  - `MODE`：`full`、`Sz` 或 `SzS2` 之一；默认 `full`。
   - `twoSz`、`twoS`：可选固定 block selector。`twoS` 要求
     `MODE=SzS2` 且固定 `twoSz`。
-  - `workflow`：`occ`、`energy`、`greedy`、`greedy_multi`、`adiabatic` 之一。
-  - `CACHE_MODE`：`none`、`load`、`save`、`partial` 之一。
-  - `ROOT`：所有 `block_main`、`block_lce` 和 `block_embed` 输出的根目录。
+  - `workflow`：`occ`、`energy`、`greedy`、`greedy_multi`、`adiabatic` 之一；
+    默认 `occ`。
+  - `CACHE_MODE`：`none`、`load`、`save`、`partial` 之一；默认 `save`。
+  - `ROOT`：所有 `block_main`、`block_lce` 和 `block_embed` 输出的根目录；
+    默认 `results`。
   - `SEED_RESULTS`：前一 `results.json`，仅 `workflow=adiabatic` 时必须提供。
 - `CACHE_DIR`、`OUTPUT_DIR` 和 `INPUTS` 不是生产 CLI key。
 - `cuprate.lce` 使用与 `cuprate.main` 相同的薄 `KEY=VALUE` 边界；
   在这个阶段中 `N` 表示 `Nmax`。
 - `cuprate.lce` 自动读取 `N=2..Nmax` 的 main results。
 - `cuprate.lce` 将 `lce_results.json` 写成 manifest，并把具体团簇
-  weight 写到 `weights/` 下。
+  weight JSON 文件和仅供检查的人类可读文本 sidecar 写到 `weights/` 下。
 - `cuprate.embed` 入口必须读取对应的 `lce_results.json` manifest 以及它引用的
   weight 文件。
 - 标准不允许生产 key `TYPE`、`SZ`、`S`、`S2`、`SZ_IDX`、`S_IDX`、
@@ -157,6 +165,7 @@ ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0/workflow_occ/results.
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0_twoS_2/workflow_occ/results.json
 ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/lce_results.json
 ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.json
+ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.txt
 ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/
 ```
 

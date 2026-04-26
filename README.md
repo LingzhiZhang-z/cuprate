@@ -1,0 +1,125 @@
+# cuprate
+
+`cuprate` computes effective spin couplings from single-band Hubbard clusters.
+The active production pipeline is:
+
+```text
+main  ->  lce  ->  embed
+```
+
+- `main` runs ED, projection, downfolding, and spin-coupling fitting for the
+  complete cluster-family set at a given `N, U, T`.
+- `lce` reads main outputs for consecutive `N=2..Nmax` and performs
+  linked-cluster subtraction.
+- `embed` reads LCE weights and embeds the net couplings onto target two-site
+  and multi-site outputs.
+
+## How To Run
+
+Install the package from the repository root:
+
+```bash
+python -m pip install -e .
+```
+
+If the package is not installed, prefix commands with `PYTHONPATH=src`.
+
+Minimal three-stage run:
+
+```bash
+PYTHONPATH=src python -m cuprate.main N=2 U=1 T=0.02
+PYTHONPATH=src python -m cuprate.lce N=2 U=1 T=0.02
+PYTHONPATH=src python -m cuprate.embed N=2 U=1 T=0.02
+```
+
+For `N=4`, LCE requires main outputs for `N=2,3,4`:
+
+```bash
+PYTHONPATH=src python -m cuprate.main N=2 U=1 T=0.02
+PYTHONPATH=src python -m cuprate.main N=3 U=1 T=0.02
+PYTHONPATH=src python -m cuprate.main N=4 U=1 T=0.02
+PYTHONPATH=src python -m cuprate.lce N=4 U=1 T=0.02
+PYTHONPATH=src python -m cuprate.embed N=4 U=1 T=0.02
+```
+
+Run the main stage with MPI:
+
+```bash
+mpirun -n 4 env PYTHONPATH=src python -m cuprate.main N=4 U=1 T=0.02
+```
+
+Common CLI parameters:
+
+```text
+N, U, T        Required physical parameters
+MODE           full | Sz | SzS2; default: full
+twoSz, twoS    Optional fixed-sector selectors; twoS requires MODE=SzS2
+workflow       occ | energy | greedy | greedy_multi | adiabatic; default: occ
+ROOT           Output root directory; default: results
+CACHE_MODE     none | load | save | partial; main default: save
+SEED_RESULTS   Previous results.json for workflow=adiabatic
+```
+
+Output directory shape:
+
+```text
+ROOT/block_main/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/
+ROOT/block_lce/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/
+ROOT/block_embed/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/
+```
+
+Key outputs:
+
+- `block_main/.../results.json`: main manifest.
+- `block_main/.../exchanges/*.json`: fitted spin couplings per
+  `(hole, class_idx)` family.
+- `block_main/.../clusters/*.json`: geometry mapping for every `cluster_idx`
+  in the same family.
+- `block_main/.../artifacts/*.npz`: projection artifacts, selected indices,
+  `H_eff`, and `T11` diagnostics.
+- `block_lce/.../lce_results.json`: LCE manifest.
+- `block_lce/.../weights/*.json`: net LCE weight for each concrete cluster.
+- `block_lce/.../weights/*.txt`: human-readable sidecar with the same stem.
+- `block_embed/.../two_site.txt`: embedded two-site target couplings.
+- `block_embed/.../clusters/*.txt`: embedded multi-site target couplings.
+
+Text files are inspection sidecars only. Downstream stages read JSON/NPZ.
+
+## Code Structure
+
+The physics core lives in `src/cuprate/`:
+
+- `clusters.py`: square-lattice cluster enumeration, isomorphic families,
+  bonds, and multi-site patterns.
+- `states.py`: Hubbard Fock basis, state ordering, double occupation,
+  fermionic signs, and state-space `Sz`/`S2` operators.
+- `sectors.py`: fixed-`twoSz` grouping, `S2` sector construction, and
+  `twoSz -> (twoSz,twoS)` basis transforms.
+- `hubbard.py`: single-cluster ED coordinator. It owns basis generation,
+  symmetry blocking, Hamiltonian construction, diagonalization, optional sector
+  merging, projection, and fit orchestration.
+- `manifold.py`: `Block`, eigenstate selection, `T11`, `H_eff`, spin-operator
+  matrices, and least-squares spin-coupling fits.
+- `operators.py`: canonical spin-operator keys, JSON serialization, and
+  conversion from fit coefficients to operator terms.
+- `lce.py`: linked-cluster subtraction using canonical operator keys.
+- `embed.py`: target-driven embedding from LCE weights to two-site and
+  multi-site target outputs.
+
+Runtime and I/O layers:
+
+- `main.py`: CLI entry point for `python -m cuprate.main`.
+- `workchain.py`: main-stage orchestration and MPI family distribution.
+- `cli.py`: shared `KEY=VALUE` parsing, defaults, and `MODE/twoSz/twoS`
+  validation.
+- `paths.py`: runtime directories, filenames, and mode tokens.
+- `io.py`: schema constants, JSON/NPZ writes, and human-readable text sidecars.
+- `mpi.py`: MPI rank and communicator plumbing.
+
+Standards live under `standards/en/`; the English standards are authoritative.
+Chinese translations live under `standards/zh/`. Start with
+`standards/en/00-CONVENTIONS.md` and the standard corresponding to the module
+being changed.
+
+`src/cuprate/back/` contains old reference code only. It is not active
+structure and should not be used as a compatibility layer.

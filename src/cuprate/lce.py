@@ -12,45 +12,24 @@ from typing import Any
 import networkx as nx
 
 from cuprate import ATOL
+from cuprate.cli import COMMON_KEYS, parse_common_runtime, parse_key_values
 from cuprate.clusters import connected_subsets, graph_from_sites
+from cuprate.io import SPIN_COUPLINGS_SCHEMA_VERSION, write_lce_outputs
 from cuprate.paths import (
-    LCE_RESULTS_FILE,
-    LCE_SUMMARY_FILE,
-    LCE_WEIGHTS_DIR,
     RESULTS_FILE,
     STAGE_LCE,
     STAGE_MAIN,
-    cluster_weight_file,
-    mode_spec,
-    mode_token,
-    parameter_token,
     workflow_dir,
-    workflow_token,
 )
 from cuprate.operators import (
     OperatorKey,
     map_key,
     max_operator_difference,
-    operator_summary,
-    operators_from_terms,
     operators_to_terms,
 )
 
 
-LCE_SCHEMA_VERSION = 1
-REQUIRED_KEYS = {"ROOT", "N", "U", "T", "MODE", "workflow"}
-CANONICAL_KEYS = {
-    "root": "ROOT",
-    "n": "N",
-    "u": "U",
-    "t": "T",
-    "mode": "MODE",
-    "twosz": "twoSz",
-    "twos": "twoS",
-    "workflow": "workflow",
-}
 COMMON_RUN_PARAM_KEYS = ("U", "T", "MODE", "twoSz", "twoS", "workflow")
-SUPPORTED_WORKFLOWS = {"occ", "energy", "greedy", "greedy_multi", "adiabatic"}
 
 
 @dataclass(frozen=True)
@@ -96,78 +75,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def parse_args(argv: list[str]) -> LCEParams:
-    raw: dict[str, str] = {}
-    for arg in argv:
-        if "=" not in arg:
-            raise ValueError(f"expected KEY=VALUE argument, got {arg!r}")
-        key, value = arg.split("=", 1)
-        canonical = CANONICAL_KEYS.get(key.lower())
-        if canonical is None:
-            raise ValueError(f"unknown parameter {key!r}")
-        if canonical in raw:
-            raise ValueError(f"duplicate parameter {canonical}")
-        raw[canonical] = value
-
-    missing = sorted(REQUIRED_KEYS - raw.keys())
-    if missing:
-        raise ValueError(f"missing required parameter(s): {', '.join(missing)}")
-
-    N = _parse_int(raw["N"], "N")
-    U = _parse_float(raw["U"], "U")
-    t = _parse_float(raw["T"], "T")
-    twoSz = _parse_optional_int(raw, "twoSz")
-    twoS = _parse_optional_int(raw, "twoS")
-    spec = mode_spec(raw["MODE"], twoSz=twoSz, twoS=twoS)
-    mode = spec.mode
-    workflow = raw["workflow"].lower()
-    if workflow not in SUPPORTED_WORKFLOWS:
-        raise ValueError(f"unsupported workflow={raw['workflow']!r}")
-    _validate_mode_args(N, spec)
+    raw = parse_key_values(argv, COMMON_KEYS)
+    common = parse_common_runtime(raw)
     return LCEParams(
-        root=Path(raw["ROOT"]),
-        N=N,
-        U=U,
-        t=t,
-        mode=mode,
-        twoSz=spec.twoSz,
-        twoS=spec.twoS,
-        workflow=workflow,
+        root=common.root,
+        N=common.N,
+        U=common.U,
+        t=common.t,
+        mode=common.mode,
+        twoSz=common.twoSz,
+        twoS=common.twoS,
+        workflow=common.workflow,
     )
-
-
-def _parse_int(value: str, key: str) -> int:
-    try:
-        return int(value)
-    except ValueError as exc:
-        raise ValueError(f"{key} must be an integer") from exc
-
-
-def _parse_float(value: str, key: str) -> float:
-    try:
-        return float(value)
-    except ValueError as exc:
-        raise ValueError(f"{key} must be a float") from exc
-
-
-def _parse_optional_int(raw: dict[str, str], key: str) -> int | None:
-    if key not in raw:
-        return None
-    return _parse_int(raw[key], key)
-
-
-def _validate_mode_args(N: int, spec) -> None:
-    if spec.twoSz is not None:
-        if abs(spec.twoSz) > N:
-            raise ValueError("twoSz must satisfy |twoSz| <= N")
-        if spec.twoSz % 2 != N % 2:
-            raise ValueError("twoSz parity must match N")
-    if spec.twoS is not None:
-        if not (0 <= spec.twoS <= N):
-            raise ValueError("twoS must satisfy 0 <= twoS <= N")
-        if spec.twoS % 2 != N % 2:
-            raise ValueError("twoS parity must match N")
-        if spec.twoSz is not None and abs(spec.twoSz) > spec.twoS:
-            raise ValueError("twoSz and twoS must satisfy |twoSz| <= twoS")
 
 
 def run_lce(params: LCEParams) -> dict[str, Any]:
@@ -187,46 +106,13 @@ def run_lce(params: LCEParams) -> dict[str, Any]:
         twoSz=params.twoSz,
         twoS=params.twoS,
     )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    weights_dir = output_dir / LCE_WEIGHTS_DIR
-    weights_dir.mkdir(parents=True, exist_ok=True)
-
-    entries = []
-    summary_entries = []
-    for N in sorted(records_by_n):
-        for record in records_by_n[N]:
-            weight_name = cluster_weight_file(record.hole, record.class_idx, record.cluster_idx)
-            relative_weight_file = f"{LCE_WEIGHTS_DIR}/{weight_name}"
-            weight_payload = _weight_payload(record)
-            (weights_dir / weight_name).write_text(json.dumps(weight_payload, indent=2) + "\n")
-            entry = {
-                "N": int(record.N),
-                "hole": int(record.hole),
-                "class_idx": int(record.class_idx),
-                "cluster_idx": int(record.cluster_idx),
-                "weight_file": relative_weight_file,
-            }
-            entries.append(entry)
-            summary_entries.append({**entry, "diagnostics": weight_payload["diagnostics"]})
-
-    payload = {
-        "schema_version": LCE_SCHEMA_VERSION,
-        "result_kind": "lce_spin_couplings",
-        "source_inputs": [str(path) for path in input_paths],
-        "run_params": {
-            **common_params,
-            "N_min": min(records_by_n),
-            "N_max": max(records_by_n),
-            "ROOT": str(params.root),
-            "parameter_token": parameter_token(params.N, params.N, params.U, params.t),
-            "mode_token": mode_token(params.mode, twoSz=params.twoSz, twoS=params.twoS),
-            "workflow_token": workflow_token(params.workflow),
-        },
-        "weights": entries,
-    }
-    (output_dir / LCE_RESULTS_FILE).write_text(json.dumps(payload, indent=2) + "\n")
-    (output_dir / LCE_SUMMARY_FILE).write_text(_summary_text(payload, summary_entries) + "\n")
-    return payload
+    return write_lce_outputs(
+        output_dir=output_dir,
+        params=params,
+        input_paths=input_paths,
+        records_by_n=records_by_n,
+        common_params=common_params,
+    )
 
 
 def _input_paths(params: LCEParams) -> list[Path]:
@@ -258,8 +144,11 @@ def _load_input_records(
         payload = json.loads(path.read_text())
         if payload.get("result_kind") != "spin_couplings":
             raise ValueError(f"{path} is not a spin_couplings results file")
-        if int(payload.get("schema_version", 0)) != 5:
-            raise ValueError(f"{path} must use spin_couplings schema_version=5")
+        if int(payload.get("schema_version", 0)) != SPIN_COUPLINGS_SCHEMA_VERSION:
+            raise ValueError(
+                f"{path} must use spin_couplings "
+                f"schema_version={SPIN_COUPLINGS_SCHEMA_VERSION}"
+            )
         if payload.get("complete_family_set", True) is not True:
             raise ValueError(f"{path} is a partial main output and cannot be used for LCE")
 
@@ -421,54 +310,6 @@ def _reconstruction_error(
         reconstructed_constant,
         dict(reconstructed_terms),
     )
-
-
-def _weight_payload(record: ClusterRecord) -> dict[str, Any]:
-    net_summary = operator_summary(record.net_constant, record.net_terms)
-    return {
-        "schema_version": LCE_SCHEMA_VERSION,
-        "result_kind": "lce_cluster_weight",
-        "N": int(record.N),
-        "hole": int(record.hole),
-        "class_idx": int(record.class_idx),
-        "cluster_idx": int(record.cluster_idx),
-        "sites": [[int(x), int(y)] for x, y in record.sites],
-        "indices": list(range(record.N)),
-        "raw_summary": operator_summary(record.raw_constant, record.raw_terms),
-        "operators": operators_from_terms(record.sites, record.net_constant, record.net_terms),
-        "diagnostics": {
-            "subcluster_count": int(record.subcluster_count),
-            "reconstruction_error": float(record.reconstruction_error),
-            "net_term_count": int(len(record.net_terms)),
-            "max_abs_net_coefficient": float(net_summary["max_abs_coefficient"]),
-        },
-    }
-
-
-def _summary_text(payload: dict[str, Any], entries: list[dict[str, Any]]) -> str:
-    lines = [
-        "LCE summary",
-        f"schema_version: {payload['schema_version']}",
-        f"N range: {payload['run_params']['N_min']}..{payload['run_params']['N_max']}",
-        f"source_inputs: {len(payload['source_inputs'])}",
-        "",
-        "Weights:",
-    ]
-    for entry in entries:
-        diagnostics = entry["diagnostics"]
-        lines.append(
-            "N={N} hole={hole} class={class_idx} cluster={cluster_idx} "
-            "weight_file={weight_file} max_net={max_net:.12e} recon_error={recon:.12e}".format(
-                N=entry["N"],
-                hole=entry["hole"],
-                class_idx=entry["class_idx"],
-                cluster_idx=entry["cluster_idx"],
-                weight_file=entry["weight_file"],
-                max_net=diagnostics["max_abs_net_coefficient"],
-                recon=diagnostics["reconstruction_error"],
-            )
-        )
-    return "\n".join(lines)
 
 
 if __name__ == "__main__":

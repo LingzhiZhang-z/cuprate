@@ -61,6 +61,7 @@ MUST:
 
 - `cache_dir` is required for `load`, `save`, and `partial`, and forbidden for
   `none`.
+- Runtime/workchain callers default `CACHE_MODE` to `save`.
 - `HubbardModel.save(cache_dir)` and `Block.save(cache)` must write the same
   solved block format.
 
@@ -121,24 +122,32 @@ MUST:
   selection diagnostics, `H_eff`, and `T11` metrics.
 - Fit output includes family-level coefficients and fit metrics.
 - The workchain/result-output layer owns writing derived outputs.
+- `cuprate.io` owns durable output payload construction, schema-version
+  constants, JSON/NPZ writes, and human-readable text sidecars for main, LCE,
+  and embed outputs.
 - `Block` owns local computation and optional selection JSONL logging, but not
   the durable result schema.
 - The canonical JSON shape is defined in `08-OPERATOR_OUTPUT.md`.
 
-## 7) Future CLI Parameters (MUST)
+## 7) Runtime CLI Parameters (MUST)
 
 MUST:
-- CLI parameters, once reintroduced, are passed as `KEY=VALUE`.
+- CLI parameters are passed as `KEY=VALUE`.
+- `cuprate.cli` owns shared `KEY=VALUE` parsing, common defaults, and common
+  `MODE`/`twoSz`/`twoS` validation for `cuprate.main`, `cuprate.lce`, and
+  `cuprate.embed`.
 - CLI keys are case-insensitive.
 - Canonical keys include:
   - `N`, `U`, `T`: physical parameters.
-  - `MODE`: one of `full`, `Sz`, or `SzS2`.
+  - `MODE`: one of `full`, `Sz`, or `SzS2`; defaults to `full`.
   - `twoSz`, `twoS`: optional fixed-block selectors. `twoS` requires
     `MODE=SzS2` and a fixed `twoSz`.
-  - `workflow`: one of `occ`, `energy`, `greedy`, `greedy_multi`, `adiabatic`.
-  - `CACHE_MODE`: one of `none`, `load`, `save`, `partial`.
+  - `workflow`: one of `occ`, `energy`, `greedy`, `greedy_multi`, `adiabatic`;
+    defaults to `occ`.
+  - `CACHE_MODE`: one of `none`, `load`, `save`, `partial`; defaults to
+    `save`.
   - `ROOT`: root directory for all `block_main`, `block_lce`, and
-    `block_embed` outputs.
+    `block_embed` outputs; defaults to `results`.
   - `SEED_RESULTS`: previous `results.json`, required only for
     `workflow=adiabatic`.
 - `CACHE_DIR`, `OUTPUT_DIR`, and `INPUTS` are not production CLI keys.
@@ -146,7 +155,7 @@ MUST:
   for this stage `N` means `Nmax`.
 - `cuprate.lce` reads main results automatically from `N=2..Nmax`.
 - `cuprate.lce` writes `lce_results.json` as a manifest plus concrete cluster
-  weights under `weights/`.
+  weight JSON files and inspection-only text sidecars under `weights/`.
 - `cuprate.embed` must read the corresponding `lce_results.json` manifest and
   its referenced weight files.
 - The standard does not permit production keys `TYPE`, `SZ`, `S`, `S2`,
@@ -170,6 +179,7 @@ ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0/workflow_occ/results.
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0_twoS_2/workflow_occ/results.json
 ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/lce_results.json
 ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.json
+ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.txt
 ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/
 ```
 

@@ -38,7 +38,8 @@
   `hubbard.py` → `states.py` → `sectors.py` → `manifold.py`
 - Read `hubbard.py` first:
   it is the active single-cluster coordinator. `HubbardModel` owns basis generation, symmetry blocking, Hamiltonian construction, solving, merging, projection, and fitting state. Its lifecycle is `set_symmetry()` → `build_hamiltonians()` → `solve()` → optional `merge_by_s2()` / `merge_by_sz()` → `project()` → `fit()`.
-- Runtime mode parsing is centralized in `paths.py`; `hubbard.py` consumes the
+- Runtime mode token logic is centralized in `paths.py`; shared `KEY=VALUE`
+  CLI parsing and runtime defaults are in `cli.py`. `hubbard.py` consumes the
   parsed mode spec. `MODE` chooses the block layer, while optional `twoSz` and
   `twoS` choose a specific block subset.
 - Read `states.py`:
@@ -48,6 +49,9 @@
 - Read `manifold.py` last in the core line:
   it holds the `Block` container, per-block selection methods (`occ`, `energy`, `greedy`, `greedy_multi`, `adiabatic`), `Block.downfold`, `Block.t11_norm`, spin-operator construction, and least-squares fit helpers.
 - Treat `mpi.py` as runtime plumbing only.
+- Treat `io.py` as runtime output serialization/reporting plumbing only,
+  including schema constants, JSON/NPZ writes, and text sidecars for main, LCE,
+  and embed stages.
 - Treat `src/cuprate/back/` as old reference material. It may be useful for physics comparison, but it is not active structure and must not be copied as compatibility scaffolding.
 
 ## Where the physics core lives
