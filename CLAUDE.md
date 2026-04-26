@@ -16,8 +16,10 @@
   `mode_twoSz_<value>`, `mode_twoSz_twoS`, `mode_twoSz_pm_twoS`,
   `mode_twoSz_<value>_twoS`,
   `mode_twoSz_<value>_twoS_<value>`
+- LCE/embed seed path tokens: `seed_<stem>` from `SEED_SET=<path>.txt`
 - Path tokens: `twoSz_<value>`, `twoS_<value>`, negative uses `n` prefix (`twoSz_n1`)
-- CLI: `workflow` (not `TYPE`), `SCOPE=nonnegative|pm` for all-`twoSz` scope
+- CLI: `workflow` (not `TYPE`), `SCOPE=nonnegative|pm` for all-`twoSz` scope,
+  `SEED_SET` for LCE/embed input selection
 
 ## Standards structure
 
@@ -43,7 +45,9 @@
   CLI parsing and runtime defaults are in `cli.py`. `hubbard.py` consumes the
   parsed mode spec. `MODE` chooses the block layer, while optional `twoSz` and
   `twoS` choose a specific block subset, and `SCOPE` chooses default nonnegative
-  versus positive/negative all-`twoSz` enumeration.
+  versus positive/negative all-`twoSz` enumeration. `cuprate.lce` and
+  `cuprate.embed` do not take `MODE`/`workflow`/`twoSz` selectors; they share
+  `SEED_SET`, a text file listing main `results.json` inputs under `ROOT`.
 - Read `states.py`:
   it defines the Fock basis, sorting, double occupation, state-space `Sz`/`S2` operators, and fermionic signs — the primitives consumed by `hubbard.py`.
 - Read `sectors.py` after that:

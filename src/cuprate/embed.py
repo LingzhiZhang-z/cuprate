@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from cuprate.cli import COMMON_KEYS, parse_common_runtime, parse_key_values
+from cuprate.cli import SEED_SET_KEYS, parse_key_values, parse_seed_set_runtime
 from cuprate.clusters import Cluster, ClusterSets, POINT_GROUP_OPERATIONS, transform
 from cuprate.io import LCE_SCHEMA_VERSION, LCE_WEIGHT_SCHEMA_VERSION, write_embed_outputs
 from cuprate.operators import OperatorKey, canonical_operator_key, operators_to_terms
@@ -17,7 +18,7 @@ from cuprate.paths import (
     STAGE_EMBED,
     STAGE_LCE,
     embed_cluster_file,
-    workflow_dir,
+    seed_stage_dir,
 )
 
 
@@ -27,11 +28,7 @@ class EmbedParams:
     N: int
     U: float
     t: float
-    mode: str
-    twoSz: int | None
-    twoS: int | None
-    scope: str
-    workflow: str
+    seed_set: Path
 
 
 @dataclass(frozen=True)
@@ -61,44 +58,34 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def parse_args(argv: list[str]) -> EmbedParams:
-    raw = parse_key_values(argv, COMMON_KEYS)
-    common = parse_common_runtime(raw)
+    raw = parse_key_values(argv, SEED_SET_KEYS)
+    common = parse_seed_set_runtime(raw)
     return EmbedParams(
         root=common.root,
         N=common.N,
         U=common.U,
         t=common.t,
-        mode=common.mode,
-        twoSz=common.twoSz,
-        twoS=common.twoS,
-        scope=common.scope,
-        workflow=common.workflow,
+        seed_set=common.seed_set,
     )
 
 
 def run_embed(params: EmbedParams) -> dict[str, Any]:
     lce_path = _lce_manifest_path(params)
     lce_manifest, records = _load_lce_weights(lce_path)
-    lce_scope = lce_manifest.get("run_params", {}).get("SCOPE")
-    if lce_scope != params.scope:
-        raise ValueError(f"{lce_path} has SCOPE={lce_scope!r}, expected {params.scope!r}")
+    _validate_lce_manifest(params, lce_path, lce_manifest)
     orientation_cache = {
         record.identity(): _distinct_parent_orientations(record.sites)
         for record in records
     }
 
-    output_dir = workflow_dir(
+    output_dir = seed_stage_dir(
         params.root,
         STAGE_EMBED,
         params.N,
         params.N,
         params.U,
         params.t,
-        params.mode,
-        params.workflow,
-        twoSz=params.twoSz,
-        twoS=params.twoS,
-        scope=params.scope,
+        params.seed_set,
     )
 
     two_site_entries = _two_site_entries(params.N, records, orientation_cache)
@@ -117,21 +104,42 @@ def run_embed(params: EmbedParams) -> dict[str, Any]:
 
 def _lce_manifest_path(params: EmbedParams) -> Path:
     return (
-        workflow_dir(
+        seed_stage_dir(
             params.root,
             STAGE_LCE,
             params.N,
             params.N,
             params.U,
             params.t,
-            params.mode,
-            params.workflow,
-            twoSz=params.twoSz,
-            twoS=params.twoS,
-            scope=params.scope,
+            params.seed_set,
         )
         / LCE_RESULTS_FILE
     )
+
+
+def _validate_lce_manifest(
+    params: EmbedParams,
+    path: Path,
+    manifest: dict[str, Any],
+) -> None:
+    run_params = manifest.get("run_params", {})
+    if int(run_params.get("N_max", -1)) != params.N:
+        raise ValueError(f"{path} has N_max={run_params.get('N_max')!r}, expected {params.N}")
+    if float(run_params.get("U", "nan")) != params.U:
+        raise ValueError(f"{path} has U={run_params.get('U')!r}, expected {params.U!r}")
+    if float(run_params.get("T", "nan")) != params.t:
+        raise ValueError(f"{path} has T={run_params.get('T')!r}, expected {params.t!r}")
+    if manifest.get("seed_set_file") != str(params.seed_set):
+        raise ValueError(
+            f"{path} has seed_set_file={manifest.get('seed_set_file')!r}, "
+            f"expected {str(params.seed_set)!r}"
+        )
+    seed_path = params.root / params.seed_set
+    if not seed_path.is_file():
+        raise ValueError(f"SEED_SET does not exist: {seed_path}")
+    seed_set_sha256 = hashlib.sha256(seed_path.read_bytes()).hexdigest()
+    if manifest.get("seed_set_sha256") != seed_set_sha256:
+        raise ValueError(f"{path} was generated from a different SEED_SET file")
 
 
 def _load_lce_weights(path: Path) -> tuple[dict[str, Any], list[WeightRecord]]:

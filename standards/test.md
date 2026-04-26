@@ -206,21 +206,32 @@ For every `cluster_idx` member in each family:
 
 ### Layer D: LCE and embed smoke
 
-After all main outputs pass for one `(MODE,workflow)` and `T`, run:
+After all main outputs pass for `T=0.2400`, create seed-set text files under
+`ROOT/seed_sets/`. Each non-empty line is a main `results.json` path relative
+to `ROOT`.
+
+Required seed sets:
+- `full_occ.txt`: `N=2..5`, `MODE=full`, `workflow=occ`.
+- `full_adiabatic.txt`: `N=2..5`, `MODE=full`, `workflow=adiabatic`.
+- `block_occ.txt`: `N=2..5`, `MODE=Sz`, even `N -> twoSz=0`, odd `N -> twoSz=1`,
+  `workflow=occ`.
+- `block_adiabatic.txt`: `N=2..5`, `MODE=Sz`, even `N -> twoSz=0`, odd
+  `N -> twoSz=1`, `workflow=adiabatic`.
+
+Then run LCE and embed with the same `SEED_SET`:
 
 ```bash
-python -m cuprate.lce ROOT=tmp/data_test_regression N=5 U=1.0 T=0.2400 MODE=full workflow=occ
-python -m cuprate.embed ROOT=tmp/data_test_regression N=5 U=1.0 T=0.2400 MODE=full workflow=occ
+python -m cuprate.lce ROOT=tmp/data_test_regression N=5 U=1.0 T=0.2400 SEED_SET=seed_sets/full_occ.txt
+python -m cuprate.embed ROOT=tmp/data_test_regression N=5 U=1.0 T=0.2400 SEED_SET=seed_sets/full_occ.txt
 ```
 
-Then repeat at least for:
-- `MODE=Sz twoSz=1 workflow=occ`
-- `MODE=full workflow=adiabatic`
-- `MODE=Sz twoSz=1 workflow=adiabatic`
+Repeat for all four seed sets.
 
 Pass conditions:
-- LCE reads consecutive `N=2..5` main outputs.
+- LCE reads consecutive `N=2..5` main outputs from `SEED_SET`.
 - All LCE reconstruction errors are within tolerance.
+- LCE writes weights under `weights/N_2`, `weights/N_3`, `weights/N_4`, and
+  `weights/N_5`.
 - Embed reads the LCE manifest and writes `embed_results.json`, `two_site.txt`,
   and expected cluster sidecars.
 

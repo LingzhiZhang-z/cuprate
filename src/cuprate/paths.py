@@ -172,6 +172,13 @@ def workflow_token(workflow: str) -> str:
     return f"workflow_{workflow.lower()}"
 
 
+def seed_token(seed_set: str | Path) -> str:
+    stem = Path(seed_set).stem
+    if not stem:
+        raise ValueError("SEED_SET must have a non-empty file stem")
+    return f"seed_{stem}"
+
+
 def stage_parameter_dir(
     root: str | Path,
     stage: str,
@@ -212,6 +219,18 @@ def workflow_dir(
         / mode_token(mode, twoSz=twoSz, twoS=twoS, scope=scope)
         / workflow_token(workflow)
     )
+
+
+def seed_stage_dir(
+    root: str | Path,
+    stage: str,
+    N: int,
+    nelec: int,
+    U: float,
+    t: float,
+    seed_set: str | Path,
+) -> Path:
+    return stage_parameter_dir(root, stage, N, nelec, U, t) / seed_token(seed_set)
 
 
 def family_exchange_file(hole: int, class_idx: int) -> str:

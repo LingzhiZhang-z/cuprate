@@ -22,6 +22,14 @@ MUST:
 - 连通性基于 NN 邻接（曼哈顿距离 $= 1$）。
 - 每个子图通过 NN 图同构匹配到已有的团簇计算结果。
 - LCE 输入必须包含连续的 `N=2..Nmax` 原始自旋耦合结果。
+- LCE 输入由与 embed 共享的 `SEED_SET` 文本文件选择。命令行仍显式
+  提供 `ROOT`、`N`、`U` 和 `T`；seed 文件只列出使用哪些 main
+  `results.json`。
+- 每个非空且非注释的 seed 行都是相对 `ROOT` 的路径。
+- main seeds 的 `run_params.N` 必须刚好覆盖 `2..Nmax`，且
+  `run_params.U/T` 必须等于 CLI 的 `U/T`。
+- `MODE`、`workflow`、`twoSz`、`twoS` 和 `SCOPE` 可以在 seeds 之间不同。
+  它们是 provenance 字段，不是 LCE 全局 selector。
 
 Code form:
 ```python
@@ -61,9 +69,11 @@ MUST:
 - LCE 入口写出 `lce_results.json`、`weights/` 下的逐团簇 weight 文件，
   以及最小 `lce_summary.txt`。
 - `lce_results.json` 的 `result_kind = "lce_spin_couplings"`。
-- `lce_results.json` 是 manifest。它记录运行参数，并为每个具体团簇指向
-  一个 weight 文件。
-- Weight 文件位于 `weights/` 下，命名为 `hole{h}_class{c}_idx{v}.json`。
+- `lce_results.json` 是 manifest。它记录 `SEED_SET` provenance，并为
+  每个具体团簇指向一个 weight 文件。
+- Weight 文件位于 `weights/N_<N>/` 下，命名为
+  `hole{h}_class{c}_idx{v}.json`。`N_<N>` 层级是必须的，避免不同 `N`
+  中同名 cluster 互相覆盖。
 - 每个 weight 文件的 `result_kind = "lce_cluster_weight"`。
 - 每个 weight 文件记录 `sites`、`indices`、使用与原始自旋耦合相同
   operator group schema 的净算符 `W(C)`，以及 reconstruction 诊断。
@@ -71,15 +81,39 @@ MUST:
 Manifest form:
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "result_kind": "lce_spin_couplings",
+  "seed_set": "block",
+  "seed_token": "seed_block",
+  "seed_set_file": "seed_sets/block.txt",
+  "seed_set_sha256": "...",
+  "source_inputs": [
+    {
+      "N": 2,
+      "results_json": "block_main/.../results.json",
+      "run_params": {
+        "MODE": "Sz",
+        "workflow": "occ",
+        "twoSz": 0,
+        "twoS": null,
+        "SCOPE": "nonnegative"
+      }
+    }
+  ],
+  "run_params": {
+    "N_min": 2,
+    "N_max": 4,
+    "U": 1.0,
+    "T": 0.24,
+    "seed_token": "seed_block"
+  },
   "weights": [
     {
       "N": 4,
       "hole": 0,
       "class_idx": 1,
       "cluster_idx": 0,
-      "weight_file": "weights/hole0_class1_idx0.json"
+      "weight_file": "weights/N_4/hole0_class1_idx0.json"
     }
   ]
 }
@@ -117,11 +151,13 @@ Validation:
 MUST:
 - embed 阶段必须读取 `lce_results.json` manifest 以及它引用的
   weight 文件，而不是原始 `results.json`。
+- embed 阶段使用与 LCE 相同的 `ROOT`、`N`、`U`、`T` 和 `SEED_SET`
+  输入。它通过 `seed_<stem>` 目录定位对应的 LCE manifest。
 - 输出位于
-  `ROOT/block_embed/N_{Nmax}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/`
+  `ROOT/block_embed/N_{Nmax}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}/seed_<stem>/`
   下。
 - `embed_results.json` 是 `result_kind = "embedded_spin_couplings"` 的 manifest。
-- `embed_summary.txt` 记录源 LCE 文件和输出数量。
+- `embed_summary.txt` 记录源 LCE 文件、seed-set provenance 和输出数量。
 - `two_site.txt` 包含 `Nmax` 内所有候选二格点键向量；未出现在累积 LCE 输出中的
   向量写为 `None`。
 - 多格点 cluster 文件命名为 `N{N}_hole{h}_class{c}_idx{i}.txt`。
@@ -129,8 +165,8 @@ MUST:
 
 Code form:
 ```text
-ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/two_site.txt
-ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/clusters/N4_hole0_class0_idx0.txt
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/two_site.txt
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/clusters/N4_hole0_class0_idx0.txt
 ```
 
 ## 6) Embed 匹配算法 (MUST)

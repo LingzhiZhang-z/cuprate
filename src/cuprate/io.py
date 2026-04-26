@@ -30,14 +30,15 @@ from cuprate.paths import (
     main_data_dir,
     mode_token,
     parameter_token,
+    seed_token,
     workflow_token,
 )
 
 
 SPIN_COUPLINGS_SCHEMA_VERSION = 5
-LCE_SCHEMA_VERSION = 1
+LCE_SCHEMA_VERSION = 2
 LCE_WEIGHT_SCHEMA_VERSION = 1
-EMBED_SCHEMA_VERSION = 1
+EMBED_SCHEMA_VERSION = 2
 
 
 def write_main_manifest(
@@ -144,9 +145,9 @@ def write_lce_outputs(
     *,
     output_dir: Path,
     params: Any,
-    input_paths: list[Path],
     records_by_n: dict[int, list[Any]],
-    common_params: dict[str, Any],
+    source_inputs: list[dict[str, Any]],
+    seed_set_sha256: str,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     weights_dir = output_dir / LCE_WEIGHTS_DIR
@@ -155,13 +156,15 @@ def write_lce_outputs(
     entries = []
     summary_entries = []
     for N in sorted(records_by_n):
+        n_dir = weights_dir / f"N_{int(N)}"
+        n_dir.mkdir(parents=True, exist_ok=True)
         for record in records_by_n[N]:
             weight_name = cluster_weight_file(record.hole, record.class_idx, record.cluster_idx)
             weight_text_name = Path(weight_name).with_suffix(".txt").name
-            relative_weight_file = f"{LCE_WEIGHTS_DIR}/{weight_name}"
+            relative_weight_file = f"{LCE_WEIGHTS_DIR}/N_{int(N)}/{weight_name}"
             weight_payload = _lce_weight_payload(record)
-            _write_json(weights_dir / weight_name, weight_payload)
-            (weights_dir / weight_text_name).write_text(_lce_weight_text(weight_payload) + "\n")
+            _write_json(n_dir / weight_name, weight_payload)
+            (n_dir / weight_text_name).write_text(_lce_weight_text(weight_payload) + "\n")
             entry = {
                 "N": int(record.N),
                 "hole": int(record.hole),
@@ -175,20 +178,21 @@ def write_lce_outputs(
     payload = {
         "schema_version": LCE_SCHEMA_VERSION,
         "result_kind": "lce_spin_couplings",
-        "source_inputs": [str(path) for path in input_paths],
+        "seed_set": Path(params.seed_set).stem,
+        "seed_token": seed_token(params.seed_set),
+        "seed_set_file": str(params.seed_set),
+        "seed_set_sha256": seed_set_sha256,
+        "source_inputs": _json_ready(source_inputs),
         "run_params": {
-            **common_params,
             "N_min": min(records_by_n),
             "N_max": max(records_by_n),
+            "N": int(params.N),
+            "nelec": int(params.N),
+            "U": float(params.U),
+            "T": float(params.t),
             "ROOT": str(params.root),
             "parameter_token": parameter_token(params.N, params.N, params.U, params.t),
-            "mode_token": mode_token(
-                params.mode,
-                twoSz=params.twoSz,
-                twoS=params.twoS,
-                scope=params.scope,
-            ),
-            "workflow_token": workflow_token(params.workflow),
+            "seed_token": seed_token(params.seed_set),
         },
         "weights": entries,
     }
@@ -525,6 +529,10 @@ def _lce_summary_text(payload: dict[str, Any], entries: list[dict[str, Any]]) ->
     lines = [
         "LCE summary",
         f"schema_version: {payload['schema_version']}",
+        f"seed_set: {payload['seed_set']}",
+        f"seed_token: {payload['seed_token']}",
+        f"seed_set_file: {payload['seed_set_file']}",
+        f"seed_set_sha256: {payload['seed_set_sha256']}",
         f"N range: {payload['run_params']['N_min']}..{payload['run_params']['N_max']}",
         f"source_inputs: {len(payload['source_inputs'])}",
         "",
@@ -605,26 +613,20 @@ def _embed_manifest_payload(
         "result_kind": "embedded_spin_couplings",
         "source_lce_manifest": str(source_lce_path),
         "source_lce_schema_version": int(lce_manifest.get("schema_version", 0)),
+        "seed_set": lce_manifest.get("seed_set"),
+        "seed_token": lce_manifest.get("seed_token"),
+        "seed_set_file": lce_manifest.get("seed_set_file"),
+        "seed_set_sha256": lce_manifest.get("seed_set_sha256"),
+        "source_inputs": _json_ready(lce_manifest.get("source_inputs", [])),
         "run_params": {
             "U": float(params.U),
             "T": float(params.t),
             "N": int(params.N),
             "Nmax": int(params.N),
             "nelec": int(params.N),
-            "MODE": params.mode,
-            "twoSz": params.twoSz,
-            "twoS": params.twoS,
-            "SCOPE": params.scope,
-            "workflow": params.workflow,
             "ROOT": str(params.root),
             "parameter_token": parameter_token(params.N, params.N, params.U, params.t),
-            "mode_token": mode_token(
-                params.mode,
-                twoSz=params.twoSz,
-                twoS=params.twoS,
-                scope=params.scope,
-            ),
-            "workflow_token": workflow_token(params.workflow),
+            "seed_token": seed_token(params.seed_set),
         },
         "two_site_file": EMBED_TWO_SITE_FILE,
         "cluster_files": cluster_files,
@@ -659,13 +661,13 @@ def _embed_summary_text(
         "Embed summary",
         f"schema_version: {payload['schema_version']}",
         f"source_lce_manifest: {source_lce_path}",
+        f"seed_set: {payload['seed_set']}",
+        f"seed_token: {payload['seed_token']}",
+        f"seed_set_file: {payload['seed_set_file']}",
+        f"seed_set_sha256: {payload['seed_set_sha256']}",
         f"Nmax: {run_params['Nmax']}",
         f"U: {run_params['U']:.12g}",
         f"T: {run_params['T']:.12g}",
-        f"MODE: {run_params['MODE']}",
-        f"twoSz: {run_params['twoSz']}",
-        f"twoS: {run_params['twoS']}",
-        f"workflow: {run_params['workflow']}",
         f"weights_read: {diagnostics['weights_read']}",
         f"two_site_candidate_count: {diagnostics['two_site_candidate_count']}",
         "cluster_file_counts: "

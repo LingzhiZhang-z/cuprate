@@ -22,6 +22,14 @@ MUST:
 - Connectivity is by NN adjacency (Manhattan distance $= 1$).
 - Each subgraph is matched to a previously computed cluster result via NN-graph isomorphism.
 - LCE input must contain consecutive `N=2..Nmax` raw spin-coupling results.
+- LCE input is selected by a `SEED_SET` text file shared with embed. The
+  command line still supplies `ROOT`, `N`, `U`, and `T`; the seed file only
+  lists which main `results.json` files are used.
+- Each non-empty, non-comment seed line is a path relative to `ROOT`.
+- The main seeds must have `run_params.N` covering exactly `2..Nmax`, and
+  `run_params.U/T` must match the CLI `U/T`.
+- `MODE`, `workflow`, `twoSz`, `twoS`, and `SCOPE` may differ across seeds.
+  They are provenance fields, not LCE-wide selectors.
 
 Code form:
 ```python
@@ -61,10 +69,11 @@ MUST:
 - The LCE entry point writes `lce_results.json`, per-cluster weight files under
   `weights/`, and a minimal `lce_summary.txt`.
 - `lce_results.json` has `result_kind = "lce_spin_couplings"`.
-- `lce_results.json` is a manifest. It records run parameters and points to one
-  weight file per concrete cluster.
-- Weight files live under `weights/` and are named
-  `hole{h}_class{c}_idx{v}.json`.
+- `lce_results.json` is a manifest. It records `SEED_SET` provenance and
+  points to one weight file per concrete cluster.
+- Weight files live under `weights/N_<N>/` and are named
+  `hole{h}_class{c}_idx{v}.json`. The `N_<N>` level is required to prevent
+  same-name clusters from different `N` values from overwriting each other.
 - Each weight file has `result_kind = "lce_cluster_weight"`.
 - Each weight file records `sites`, `indices`, the net operators `W(C)` using
   the same operator group schema as raw spin couplings, and reconstruction
@@ -73,15 +82,39 @@ MUST:
 Manifest form:
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "result_kind": "lce_spin_couplings",
+  "seed_set": "block",
+  "seed_token": "seed_block",
+  "seed_set_file": "seed_sets/block.txt",
+  "seed_set_sha256": "...",
+  "source_inputs": [
+    {
+      "N": 2,
+      "results_json": "block_main/.../results.json",
+      "run_params": {
+        "MODE": "Sz",
+        "workflow": "occ",
+        "twoSz": 0,
+        "twoS": null,
+        "SCOPE": "nonnegative"
+      }
+    }
+  ],
+  "run_params": {
+    "N_min": 2,
+    "N_max": 4,
+    "U": 1.0,
+    "T": 0.24,
+    "seed_token": "seed_block"
+  },
   "weights": [
     {
       "N": 4,
       "hole": 0,
       "class_idx": 1,
       "cluster_idx": 0,
-      "weight_file": "weights/hole0_class1_idx0.json"
+      "weight_file": "weights/N_4/hole0_class1_idx0.json"
     }
   ]
 }
@@ -120,11 +153,14 @@ Validation:
 MUST:
 - The embed stage must read the `lce_results.json` manifest and its
   referenced weight files, not raw `results.json`.
+- The embed stage uses the same `ROOT`, `N`, `U`, `T`, and `SEED_SET` inputs as
+  LCE. It locates the matching LCE manifest through the `seed_<stem>` directory.
 - Output lives under
-  `ROOT/block_embed/N_{Nmax}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/`.
+  `ROOT/block_embed/N_{Nmax}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}/seed_<stem>/`.
 - `embed_results.json` is a manifest with
   `result_kind = "embedded_spin_couplings"`.
-- `embed_summary.txt` records the source LCE file and output counts.
+- `embed_summary.txt` records the source LCE file, seed-set provenance, and
+  output counts.
 - `two_site.txt` contains all candidate two-site bond vectors within `Nmax`;
   vectors not present in accumulated LCE output are written as `None`.
 - Multi-site cluster files are named `N{N}_hole{h}_class{c}_idx{i}.txt`.
@@ -132,8 +168,8 @@ MUST:
 
 Code form:
 ```text
-ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/two_site.txt
-ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/clusters/N4_hole0_class0_idx0.txt
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/two_site.txt
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/clusters/N4_hole0_class0_idx0.txt
 ```
 
 ## 6) Embed Matching Algorithm (MUST)

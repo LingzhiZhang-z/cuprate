@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -12,14 +13,13 @@ from typing import Any
 import networkx as nx
 
 from cuprate import ATOL
-from cuprate.cli import COMMON_KEYS, parse_common_runtime, parse_key_values
+from cuprate.cli import SEED_SET_KEYS, parse_key_values, parse_seed_set_runtime
 from cuprate.clusters import connected_subsets, graph_from_sites
 from cuprate.io import SPIN_COUPLINGS_SCHEMA_VERSION, write_lce_outputs
 from cuprate.paths import (
     RESULTS_FILE,
     STAGE_LCE,
-    STAGE_MAIN,
-    workflow_dir,
+    seed_stage_dir,
 )
 from cuprate.operators import (
     OperatorKey,
@@ -29,20 +29,13 @@ from cuprate.operators import (
 )
 
 
-COMMON_RUN_PARAM_KEYS = ("U", "T", "MODE", "twoSz", "twoS", "SCOPE", "workflow")
-
-
 @dataclass(frozen=True)
 class LCEParams:
     root: Path
     N: int
     U: float
     t: float
-    mode: str
-    twoSz: int | None
-    twoS: int | None
-    scope: str
-    workflow: str
+    seed_set: Path
 
 
 @dataclass
@@ -76,77 +69,49 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def parse_args(argv: list[str]) -> LCEParams:
-    raw = parse_key_values(argv, COMMON_KEYS)
-    common = parse_common_runtime(raw)
+    raw = parse_key_values(argv, SEED_SET_KEYS)
+    common = parse_seed_set_runtime(raw)
     return LCEParams(
         root=common.root,
         N=common.N,
         U=common.U,
         t=common.t,
-        mode=common.mode,
-        twoSz=common.twoSz,
-        twoS=common.twoS,
-        scope=common.scope,
-        workflow=common.workflow,
+        seed_set=common.seed_set,
     )
 
 
 def run_lce(params: LCEParams) -> dict[str, Any]:
-    input_paths = _input_paths(params)
-    records_by_n, common_params = _load_input_records(input_paths, expected_scope=params.scope)
+    records_by_n, source_inputs, seed_set_sha256 = _load_seed_records(params)
     _compute_lce(records_by_n)
 
-    output_dir = workflow_dir(
+    output_dir = seed_stage_dir(
         params.root,
         STAGE_LCE,
         params.N,
         params.N,
         params.U,
         params.t,
-        params.mode,
-        params.workflow,
-        twoSz=params.twoSz,
-        twoS=params.twoS,
-        scope=params.scope,
+        params.seed_set,
     )
     return write_lce_outputs(
         output_dir=output_dir,
         params=params,
-        input_paths=input_paths,
         records_by_n=records_by_n,
-        common_params=common_params,
+        source_inputs=source_inputs,
+        seed_set_sha256=seed_set_sha256,
     )
 
 
-def _input_paths(params: LCEParams) -> list[Path]:
-    return [
-        workflow_dir(
-            params.root,
-            STAGE_MAIN,
-            N,
-            N,
-            params.U,
-            params.t,
-            params.mode,
-            params.workflow,
-            twoSz=params.twoSz,
-            twoS=params.twoS,
-            scope=params.scope,
-        )
-        / RESULTS_FILE
-        for N in range(2, params.N + 1)
-    ]
-
-
-def _load_input_records(
-    input_paths: list[Path],
-    *,
-    expected_scope: str,
-) -> tuple[dict[int, list[ClusterRecord]], dict[str, Any]]:
+def _load_seed_records(
+    params: LCEParams,
+) -> tuple[dict[int, list[ClusterRecord]], list[dict[str, Any]], str]:
     records_by_n: dict[int, list[ClusterRecord]] = {}
-    common_params: dict[str, Any] | None = None
+    source_inputs_by_n: dict[int, dict[str, Any]] = {}
+    seed_lines, seed_set_sha256 = _read_seed_set(params)
 
-    for path in input_paths:
+    for relative_path, path in seed_lines:
+        if not path.is_file():
+            raise ValueError(f"seed input does not exist: {path}")
         payload = json.loads(path.read_text())
         if payload.get("result_kind") != "spin_couplings":
             raise ValueError(f"{path} is not a spin_couplings results file")
@@ -159,27 +124,54 @@ def _load_input_records(
             raise ValueError(f"{path} is a partial main output and cannot be used for LCE")
 
         run_params = payload["run_params"]
-        if run_params.get("SCOPE") != expected_scope:
-            raise ValueError(
-                f"{path} has SCOPE={run_params.get('SCOPE')!r}, expected {expected_scope!r}"
-            )
         N = int(run_params["N"])
         if N in records_by_n:
             raise ValueError(f"duplicate input for N={N}")
-        current_common = {key: run_params.get(key) for key in COMMON_RUN_PARAM_KEYS}
-        if common_params is None:
-            common_params = current_common
-        elif current_common != common_params:
-            raise ValueError("all inputs must share U/T/MODE/twoSz/twoS/SCOPE/workflow")
+        if float(run_params["U"]) != params.U:
+            raise ValueError(f"{path} has U={run_params['U']!r}, expected {params.U!r}")
+        if float(run_params["T"]) != params.t:
+            raise ValueError(f"{path} has T={run_params['T']!r}, expected {params.t!r}")
+        if int(run_params.get("nelec", -1)) != N:
+            raise ValueError(
+                f"{path} has nelec={run_params.get('nelec')!r}, expected {N} "
+                "(LCE assumes half filling: nelec == N)"
+            )
 
         records = _records_from_manifest(path, N, payload)
         records.sort(key=lambda record: (record.hole, record.class_idx, record.cluster_idx))
         records_by_n[N] = records
+        source_inputs_by_n[N] = {
+            "N": N,
+            "results_json": relative_path,
+            "run_params": dict(run_params),
+        }
 
-    expected = list(range(2, max(records_by_n) + 1))
+    expected = list(range(2, params.N + 1))
     if sorted(records_by_n) != expected:
         raise ValueError(f"main results must cover consecutive N values {expected}")
-    return records_by_n, common_params or {}
+    return records_by_n, [source_inputs_by_n[N] for N in expected], seed_set_sha256
+
+
+def _read_seed_set(params: LCEParams) -> tuple[list[tuple[str, Path]], str]:
+    seed_path = params.root / params.seed_set
+    if not seed_path.is_file():
+        raise ValueError(f"SEED_SET does not exist: {seed_path}")
+
+    lines: list[tuple[str, Path]] = []
+    content = seed_path.read_bytes()
+    for line_number, raw_line in enumerate(content.decode().splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        relative_path = Path(line)
+        if relative_path.is_absolute():
+            raise ValueError(f"SEED_SET line {line_number} must be relative to ROOT")
+        if relative_path.name != RESULTS_FILE:
+            raise ValueError(f"SEED_SET line {line_number} must point to {RESULTS_FILE}")
+        lines.append((line, params.root / relative_path))
+    if not lines:
+        raise ValueError(f"SEED_SET has no input rows: {seed_path}")
+    return lines, hashlib.sha256(content).hexdigest()
 
 
 def _records_from_manifest(path: Path, N: int, payload: dict[str, Any]) -> list[ClusterRecord]:

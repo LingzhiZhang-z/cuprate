@@ -20,6 +20,15 @@ COMMON_KEYS = {
     "workflow": "workflow",
 }
 REQUIRED_COMMON_KEYS = {"N", "U", "T"}
+SEED_SET_KEYS = {
+    "root": "ROOT",
+    "n": "N",
+    "u": "U",
+    "t": "T",
+    "seed_set": "SEED_SET",
+    "seedset": "SEED_SET",
+}
+REQUIRED_SEED_SET_KEYS = {"N", "U", "T", "SEED_SET"}
 SUPPORTED_WORKFLOWS = {"occ", "energy", "greedy", "greedy_multi", "adiabatic"}
 
 
@@ -34,6 +43,15 @@ class RuntimeArgs:
     twoS: int | None
     scope: str
     workflow: str
+
+
+@dataclass(frozen=True)
+class SeedSetRuntimeArgs:
+    root: Path
+    N: int
+    U: float
+    t: float
+    seed_set: Path
 
 
 def parse_key_values(argv: list[str], canonical_keys: dict[str, str]) -> dict[str, str]:
@@ -80,6 +98,24 @@ def parse_common_runtime(raw: dict[str, str]) -> RuntimeArgs:
         twoS=spec.twoS,
         scope=spec.scope,
         workflow=workflow,
+    )
+
+
+def parse_seed_set_runtime(raw: dict[str, str]) -> SeedSetRuntimeArgs:
+    missing = sorted(REQUIRED_SEED_SET_KEYS - raw.keys())
+    if missing:
+        raise ValueError(f"missing required parameter(s): {', '.join(missing)}")
+
+    seed_set = Path(raw["SEED_SET"])
+    if seed_set.is_absolute():
+        raise ValueError("SEED_SET must be relative to ROOT")
+
+    return SeedSetRuntimeArgs(
+        root=Path(raw.get("ROOT", "results")),
+        N=parse_int(raw["N"], "N"),
+        U=parse_float(raw["U"], "U"),
+        t=parse_float(raw["T"], "T"),
+        seed_set=seed_set,
     )
 
 

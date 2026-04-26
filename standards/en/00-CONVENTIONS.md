@@ -77,8 +77,11 @@ MUST:
   - `mode_twoSz_pm_twoS`
   - `mode_twoSz_<value>_twoS`
   - `mode_twoSz_<value>_twoS_<value>`
+  - `seed_<stem>` for LCE/embed outputs selected by a `SEED_SET` text file
 - Path `mode_*` tokens are output directory names, not accepted CLI `MODE`
   values.
+- Path `seed_*` tokens are derived from the `SEED_SET` file stem. They are
+  output directory names, not physics mode names.
 - Legacy CLI names such as `fixed_sz`, `block_sz_full`, `fixed_sz_s2`,
   `fixed_sz_s2_all`, `block_sz_s2_full`, `fixed_sz_ssq`,
   `block_sz_ssq_full`, `_sz...`, `_s...`, `SZ`, `S`, `S2`, `SZ_IDX`,
@@ -88,9 +91,10 @@ Code form:
 ```text
 canonical physics names: twoSz, twoS, S2
 canonical workflow key: workflow
+canonical LCE/embed input key: SEED_SET
 canonical all-twoSz scope key: SCOPE
 canonical CLI modes: full, Sz, SzS2
-canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*
+canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*, seed_*
 negative value encoding: n prefix (e.g. twoSz_n1 = twoSz = -1)
 ```
 

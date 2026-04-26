@@ -126,9 +126,9 @@ MUST:
 
 MUST:
 - CLI 参数通过 `KEY=VALUE` 传递。
-- `cuprate.cli` 拥有 `cuprate.main`、`cuprate.lce` 和 `cuprate.embed`
-  共享的 `KEY=VALUE` 解析、公共默认值，以及公共 `MODE`/`twoSz`/`twoS`
-  校验。
+- `cuprate.cli` 拥有共享的 `KEY=VALUE` 解析、main-stage 默认值、
+  main-stage `MODE`/`twoSz`/`twoS` 校验，以及 `cuprate.lce` 和
+  `cuprate.embed` 的 seed-set 解析。
 - CLI 键不区分大小写。
 - 规范 key 包括：
   - `N`、`U`、`T`：物理参数。
@@ -143,14 +143,18 @@ MUST:
   - `ROOT`：所有 `block_main`、`block_lce` 和 `block_embed` 输出的根目录；
     默认 `results`。
   - `SEED_RESULTS`：前一 `results.json`，仅 `workflow=adiabatic` 时必须提供。
+  - `SEED_SET`：`ROOT` 下的 LCE/embed 文本文件；每个非注释行都是相对
+    `ROOT` 的 main `results.json` 路径。
 - `CACHE_DIR`、`OUTPUT_DIR` 和 `INPUTS` 不是生产 CLI key。
-- `cuprate.lce` 使用与 `cuprate.main` 相同的薄 `KEY=VALUE` 边界；
-  在这个阶段中 `N` 表示 `Nmax`。
-- `cuprate.lce` 自动读取 `N=2..Nmax` 的 main results。
+- `cuprate.lce` 只接受 `ROOT`、`N`、`U`、`T` 和 `SEED_SET`；在这个阶段中
+  `N` 表示 `Nmax`。
+- `cuprate.lce` 从 `SEED_SET` 读取 main results，校验它们覆盖
+  `N=2..Nmax`，并校验它们的 `U/T` 等于 CLI 值。
 - `cuprate.lce` 将 `lce_results.json` 写成 manifest，并把具体团簇
-  weight JSON 文件和仅供检查的人类可读文本 sidecar 写到 `weights/` 下。
-- `cuprate.embed` 入口必须读取对应的 `lce_results.json` manifest 以及它引用的
-  weight 文件。
+  weight JSON 文件和仅供检查的人类可读文本 sidecar 写到 `weights/N_<N>/` 下。
+- `cuprate.embed` 只接受 `ROOT`、`N`、`U`、`T` 和同一个 `SEED_SET`；它必须
+  从匹配的 `seed_<stem>` 目录读取对应的 `lce_results.json` manifest 以及它
+  引用的 weight 文件。
 - 标准不允许生产 key `TYPE`、`SZ`、`S`、`S2`、`SZ_IDX`、`S_IDX`、
   `BLOCKS`、`SELECT` 或 `MATCH_SPIN_SECTORS`。
 
@@ -163,10 +167,12 @@ MUST:
   - `block_embed`
 - 通用 parameter directory token 是
   `N_{N}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}`。
-- Workflow 输出位于 `mode_* / workflow_*` 下。
+- Main workflow 输出位于 `mode_* / workflow_*` 下。
 - 默认 `SCOPE=nonnegative` 使用短 all-`twoSz` 路径 token：
   `mode_twoSz` 和 `mode_twoSz_twoS`。
 - 显式 `SCOPE=pm` 使用 `mode_twoSz_pm` 和 `mode_twoSz_pm_twoS`。
+- LCE 和 embed 输出位于 `seed_<stem>` 下，其中 `<stem>` 是 `SEED_SET`
+  文件 stem。
 
 Code form:
 ```text
@@ -174,10 +180,11 @@ ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/results.jso
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0/workflow_occ/results.json
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_pm/workflow_occ/results.json
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0_twoS_2/workflow_occ/results.json
-ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/lce_results.json
-ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.json
-ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.txt
-ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/
+ROOT/seed_sets/block.txt
+ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/lce_results.json
+ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/weights/N_2/hole0_class0_idx0.json
+ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/weights/N_2/hole0_class0_idx0.txt
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/
 ```
 
 ## 9) 未来部分 family 运行 (MAY)

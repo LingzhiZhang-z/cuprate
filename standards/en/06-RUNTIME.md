@@ -138,8 +138,8 @@ MUST:
 
 MUST:
 - CLI parameters are passed as `KEY=VALUE`.
-- `cuprate.cli` owns shared `KEY=VALUE` parsing, common defaults, and common
-  `MODE`/`twoSz`/`twoS` validation for `cuprate.main`, `cuprate.lce`, and
+- `cuprate.cli` owns shared `KEY=VALUE` parsing, main-stage defaults, main-stage
+  `MODE`/`twoSz`/`twoS` validation, and seed-set parsing for `cuprate.lce` and
   `cuprate.embed`.
 - CLI keys are case-insensitive.
 - Canonical keys include:
@@ -157,14 +157,18 @@ MUST:
     `block_embed` outputs; defaults to `results`.
   - `SEED_RESULTS`: previous `results.json`, required only for
     `workflow=adiabatic`.
+  - `SEED_SET`: LCE/embed text file under `ROOT`; each non-comment line is a
+    main `results.json` path relative to `ROOT`.
 - `CACHE_DIR`, `OUTPUT_DIR`, and `INPUTS` are not production CLI keys.
-- `cuprate.lce` uses the same thin `KEY=VALUE` boundary as `cuprate.main`;
-  for this stage `N` means `Nmax`.
-- `cuprate.lce` reads main results automatically from `N=2..Nmax`.
+- `cuprate.lce` takes exactly `ROOT`, `N`, `U`, `T`, and `SEED_SET`; for this
+  stage `N` means `Nmax`.
+- `cuprate.lce` reads main results from `SEED_SET`, validates that they cover
+  `N=2..Nmax`, and validates their `U/T` against the CLI values.
 - `cuprate.lce` writes `lce_results.json` as a manifest plus concrete cluster
-  weight JSON files and inspection-only text sidecars under `weights/`.
-- `cuprate.embed` must read the corresponding `lce_results.json` manifest and
-  its referenced weight files.
+  weight JSON files and inspection-only text sidecars under `weights/N_<N>/`.
+- `cuprate.embed` takes exactly `ROOT`, `N`, `U`, `T`, and the same `SEED_SET`;
+  it must read the corresponding `lce_results.json` manifest and its referenced
+  weight files from the matching `seed_<stem>` directory.
 - The standard does not permit production keys `TYPE`, `SZ`, `S`, `S2`,
   `SZ_IDX`, `S_IDX`, `BLOCKS`, `SELECT`, or `MATCH_SPIN_SECTORS`.
 
@@ -177,10 +181,12 @@ MUST:
   - `block_embed`
 - The common parameter directory token is
   `N_{N}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}`.
-- Workflow outputs live under `mode_* / workflow_*`.
+- Main workflow outputs live under `mode_* / workflow_*`.
 - Default `SCOPE=nonnegative` uses the short all-`twoSz` path tokens
   `mode_twoSz` and `mode_twoSz_twoS`.
 - Explicit `SCOPE=pm` uses `mode_twoSz_pm` and `mode_twoSz_pm_twoS`.
+- LCE and embed outputs live under `seed_<stem>`, where `<stem>` is the
+  `SEED_SET` file stem.
 
 Code form:
 ```text
@@ -188,10 +194,11 @@ ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/results.jso
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0/workflow_occ/results.json
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_pm/workflow_occ/results.json
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0_twoS_2/workflow_occ/results.json
-ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/lce_results.json
-ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.json
-ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.txt
-ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/
+ROOT/seed_sets/block.txt
+ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/lce_results.json
+ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/weights/N_2/hole0_class0_idx0.json
+ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/weights/N_2/hole0_class0_idx0.txt
+ROOT/block_embed/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/
 ```
 
 ## 9) Future Partial-Family Runs (MAY)

@@ -76,7 +76,10 @@ MUST:
   - `mode_twoSz_pm_twoS`
   - `mode_twoSz_<value>_twoS`
   - `mode_twoSz_<value>_twoS_<value>`
+  - `seed_<stem>`：由 `SEED_SET` 文本文件选择的 LCE/embed 输出
 - 路径里的 `mode_*` token 是输出目录名，不是 CLI `MODE` 输入值。
+- 路径里的 `seed_*` token 来自 `SEED_SET` 文件 stem。它们是输出目录名，
+  不是物理 mode 名称。
 - 遗留 CLI 名称如 `fixed_sz`、`block_sz_full`、`fixed_sz_s2`、
   `fixed_sz_s2_all`、`block_sz_s2_full`、`fixed_sz_ssq`、
   `block_sz_ssq_full`、`_sz...`、`_s...`、`SZ`、`S`、`S2`、`SZ_IDX`、
@@ -86,9 +89,10 @@ Code form:
 ```text
 canonical physics names: twoSz, twoS, S2
 canonical workflow key: workflow
+canonical LCE/embed input key: SEED_SET
 canonical all-twoSz scope key: SCOPE
 canonical CLI modes: full, Sz, SzS2
-canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*
+canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*, seed_*
 negative value encoding: n prefix (e.g. twoSz_n1 = twoSz = -1)
 ```
 

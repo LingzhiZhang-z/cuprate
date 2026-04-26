@@ -9,10 +9,10 @@ main  ->  lce  ->  embed
 
 - `main` runs ED, projection, downfolding, and spin-coupling fitting for the
   complete cluster-family set at a given `N, U, T`.
-- `lce` reads main outputs for consecutive `N=2..Nmax` and performs
-  linked-cluster subtraction.
-- `embed` reads LCE weights and embeds the net couplings onto target two-site
-  and multi-site outputs.
+- `lce` reads a `SEED_SET` text file listing main outputs for consecutive
+  `N=2..Nmax` and performs linked-cluster subtraction.
+- `embed` uses the same `SEED_SET`, reads the matching LCE weights, and embeds
+  the net couplings onto target two-site and multi-site outputs.
 
 ## How To Run
 
@@ -28,8 +28,10 @@ Minimal three-stage run:
 
 ```bash
 PYTHONPATH=src python -m cuprate.main N=2 U=1 T=0.02
-PYTHONPATH=src python -m cuprate.lce N=2 U=1 T=0.02
-PYTHONPATH=src python -m cuprate.embed N=2 U=1 T=0.02
+mkdir -p results/seed_sets
+printf "block_main/N_2_nelec_2_U_1.0000_t_0.0200/mode_full/workflow_occ/results.json\n" > results/seed_sets/full_occ.txt
+PYTHONPATH=src python -m cuprate.lce N=2 U=1 T=0.02 SEED_SET=seed_sets/full_occ.txt
+PYTHONPATH=src python -m cuprate.embed N=2 U=1 T=0.02 SEED_SET=seed_sets/full_occ.txt
 ```
 
 For `N=4`, LCE requires main outputs for `N=2,3,4`:
@@ -38,8 +40,14 @@ For `N=4`, LCE requires main outputs for `N=2,3,4`:
 PYTHONPATH=src python -m cuprate.main N=2 U=1 T=0.02
 PYTHONPATH=src python -m cuprate.main N=3 U=1 T=0.02
 PYTHONPATH=src python -m cuprate.main N=4 U=1 T=0.02
-PYTHONPATH=src python -m cuprate.lce N=4 U=1 T=0.02
-PYTHONPATH=src python -m cuprate.embed N=4 U=1 T=0.02
+mkdir -p results/seed_sets
+printf "%s\n" \
+  "block_main/N_2_nelec_2_U_1.0000_t_0.0200/mode_full/workflow_occ/results.json" \
+  "block_main/N_3_nelec_3_U_1.0000_t_0.0200/mode_full/workflow_occ/results.json" \
+  "block_main/N_4_nelec_4_U_1.0000_t_0.0200/mode_full/workflow_occ/results.json" \
+  > results/seed_sets/full_occ.txt
+PYTHONPATH=src python -m cuprate.lce N=4 U=1 T=0.02 SEED_SET=seed_sets/full_occ.txt
+PYTHONPATH=src python -m cuprate.embed N=4 U=1 T=0.02 SEED_SET=seed_sets/full_occ.txt
 ```
 
 Run the main stage with MPI:
@@ -59,6 +67,7 @@ workflow       occ | energy | greedy | greedy_multi | adiabatic; default: occ
 ROOT           Output root directory; default: results
 CACHE_MODE     none | load | save | partial; main default: save
 SEED_RESULTS   Previous results.json for workflow=adiabatic
+SEED_SET       LCE/embed text file under ROOT; each row is a main results.json
 ```
 
 For all-`twoSz` `MODE=Sz` / `MODE=SzS2` runs, default `SCOPE=nonnegative`
@@ -69,8 +78,8 @@ Output directory shape:
 
 ```text
 ROOT/block_main/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/
-ROOT/block_lce/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/
-ROOT/block_embed/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/
+ROOT/block_lce/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/seed_<stem>/
+ROOT/block_embed/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/seed_<stem>/
 ```
 
 Default all-`twoSz` output paths use `mode_twoSz` / `mode_twoSz_twoS`; `SCOPE=pm`
@@ -88,8 +97,8 @@ Key outputs:
 - `block_main/.../artifacts/*.npz`: projection artifacts, selected indices,
   `H_eff`, and `T11` diagnostics.
 - `block_lce/.../lce_results.json`: LCE manifest.
-- `block_lce/.../weights/*.json`: net LCE weight for each concrete cluster.
-- `block_lce/.../weights/*.txt`: human-readable sidecar with the same stem.
+- `block_lce/.../weights/N_*/*.json`: net LCE weight for each concrete cluster.
+- `block_lce/.../weights/N_*/*.txt`: human-readable sidecar with the same stem.
 - `block_embed/.../two_site.txt`: embedded two-site target couplings.
 - `block_embed/.../clusters/*.txt`: embedded multi-site target couplings.
 
@@ -120,9 +129,9 @@ Runtime and I/O layers:
 
 - `main.py`: CLI entry point for `python -m cuprate.main`.
 - `workchain.py`: main-stage orchestration and MPI family distribution.
-- `cli.py`: shared `KEY=VALUE` parsing, defaults, and `MODE/twoSz/twoS`
-  validation.
-- `paths.py`: runtime directories, filenames, and mode tokens.
+- `cli.py`: shared `KEY=VALUE` parsing, defaults, main-stage
+  `MODE/twoSz/twoS` validation, and LCE/embed `SEED_SET` parsing.
+- `paths.py`: runtime directories, filenames, mode tokens, and seed tokens.
 - `io.py`: schema constants, JSON/NPZ writes, and human-readable text sidecars.
 - `mpi.py`: MPI rank and communicator plumbing.
 
