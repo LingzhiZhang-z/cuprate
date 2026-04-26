@@ -68,6 +68,9 @@ def write_projection_npz(path: Path, model: Any) -> None:
         "twoS": np.array(
             [np.nan if block.twoS is None else float(block.twoS) for block in model.blocks]
         ),
+        "eta": np.array(
+            [np.nan if block.eta is None else float(block.eta) for block in model.blocks]
+        ),
         "t11_minus_1_norm": np.array(model.t11m1_norms, dtype=float),
         "overlap": np.array(
             [
@@ -335,6 +338,7 @@ def _projection_blocks(model: Any) -> list[dict[str, Any]]:
             "block": block.label(),
             "twoSz": None if block.twoSz is None else int(block.twoSz),
             "twoS": None if block.twoS is None else int(block.twoS),
+            "eta": None if block.eta is None else int(block.eta),
             "selected_indices": [int(idx) for idx in selected],
             "selected_state_count": int(len(selected)),
             "spin_dim": int(block.spin_dim),
@@ -416,6 +420,7 @@ def _exchange_text(payload: dict[str, Any]) -> str:
             f"block={block['block']} "
             f"twoSz={_none_as_all(block['twoSz'])} "
             f"twoS={_none_as_all(block['twoS'])} "
+            f"eta={_none_as_all(block['eta'])} "
             f"spin_dim={block['spin_dim']} "
             f"selected={block['selected_state_count']} "
             f"|T11-I|={_format_float(block['t11_minus_1_norm'])} "

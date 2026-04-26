@@ -35,14 +35,19 @@ class Block:
     eigvecs: np.ndarray | None = None
     twoSz: int | None = None
     twoS: int | None = None
+    eta: int | None = None
     basis_transform: np.ndarray | None = None
 
     @staticmethod
-    def _label(twoSz: int | None, twoS: int | None) -> str:
-        return block_token(twoSz, twoS)
+    def _label(
+        twoSz: int | None,
+        twoS: int | None,
+        eta: int | None = None,
+    ) -> str:
+        return block_token(twoSz, twoS, eta)
 
     def label(self) -> str:
-        return self._label(self.twoSz, self.twoS)
+        return self._label(self.twoSz, self.twoS, self.eta)
 
     def save(self, directory: str | Path) -> None:
         """Save block into `directory`: `{label}_data.npz` + `{label}_label.txt`."""
@@ -63,9 +68,10 @@ class Block:
         state_width = max((len(str(s)) for s in states), default=1)
         twoSz_str = "all" if self.twoSz is None else str(self.twoSz)
         twoS_str = "all" if self.twoS is None else str(self.twoS)
+        eta_str = "all" if self.eta is None else str(self.eta)
         eigvals = np.real_if_close(np.asarray(self.eigvals)) if self.eigvals is not None else np.array([])
 
-        header = f"{self.N} {self.nelec} {twoSz_str} {twoS_str} {len(states)} {len(eigvals)}"
+        header = f"{self.N} {self.nelec} {twoSz_str} {twoS_str} {eta_str} {len(states)} {len(eigvals)}"
 
         lines = [header]
         for i in range(0, len(states), 10):
@@ -81,9 +87,10 @@ class Block:
         directory: str | Path,
         twoSz: int | None = None,
         twoS: int | None = None,
+        eta: int | None = None,
     ) -> "Block":
         """Load block `{label}_data.npz` + `{label}_label.txt` from `directory`."""
-        base = Path(directory) / cls._label(twoSz, twoS)
+        base = Path(directory) / cls._label(twoSz, twoS, eta)
         data = np.load(f"{base}_data.npz")
         eigvecs = data["eigvecs"] if "eigvecs" in data.files else None
         ham = data["ham"] if "ham" in data.files else None
@@ -94,8 +101,9 @@ class Block:
         nelec = int(tokens[1])
         twoSz = None if tokens[2] == "all" else int(tokens[2])
         twoS = None if tokens[3] == "all" else int(tokens[3])
-        n_states, n_eigvals = int(tokens[4]), int(tokens[5])
-        idx = 6
+        eta = None if tokens[4] == "all" else int(tokens[4])
+        n_states, n_eigvals = int(tokens[5]), int(tokens[6])
+        idx = 7
         basis_states = [int(x) for x in tokens[idx:idx + n_states]]
         idx += n_states
         eigvals = (
@@ -112,6 +120,7 @@ class Block:
             eigvecs=eigvecs,
             twoSz=twoSz,
             twoS=twoS,
+            eta=eta,
             basis_transform=basis_transform,
         )
 
@@ -121,8 +130,9 @@ class Block:
         directory: str | Path,
         twoSz: int | None = None,
         twoS: int | None = None,
+        eta: int | None = None,
     ) -> bool:
-        base = Path(directory) / cls._label(twoSz, twoS)
+        base = Path(directory) / cls._label(twoSz, twoS, eta)
         return Path(f"{base}_data.npz").exists() and Path(f"{base}_label.txt").exists()
 
     def eigenstate_twoSz(self) -> np.ndarray:

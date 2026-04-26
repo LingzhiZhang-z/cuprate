@@ -137,6 +137,55 @@ def calc_double_occupation_matrix(states: list[int], N: int) -> np.ndarray:
     return np.diag(diag)
 
 
+def calc_eta2_matrix_direct(states: list[int], N: int, signs) -> np.ndarray:
+    """Build eta2 directly in one fixed half-filled Fock basis."""
+    if len(signs) != N:
+        raise ValueError(f"eta signs length {len(signs)} does not match N={N}")
+
+    state_to_row = {state: row for row, state in enumerate(states)}
+    matrix = np.zeros((len(states), len(states)), dtype=complex)
+
+    for col, state in enumerate(states):
+        empty_sites = []
+        doublon_sites = []
+        for site in range(N):
+            code = site_code(state, site)
+            if code == 0:
+                empty_sites.append(site)
+            elif code == 3:
+                doublon_sites.append(site)
+
+        matrix[col, col] += len(empty_sites)
+        for empty_site in empty_sites:
+            for doublon_site in doublon_sites:
+                moved_state = set_site(
+                    set_site(state, empty_site, 3),
+                    doublon_site,
+                    0,
+                )
+                matrix[state_to_row[moved_state], col] += (
+                    int(signs[empty_site]) * int(signs[doublon_site])
+                )
+    return matrix
+
+
+def calc_eta_plus_matrix(states_src: list[int], states_dst: list[int], N: int, signs) -> np.ndarray:
+    """Build eta+ between two Fock bases with the same twoSz."""
+    if len(signs) != N:
+        raise ValueError(f"eta signs length {len(signs)} does not match N={N}")
+
+    state_to_row = {state: row for row, state in enumerate(states_dst)}
+    matrix = np.zeros((len(states_dst), len(states_src)), dtype=complex)
+    for col, state in enumerate(states_src):
+        for site in range(N):
+            if site_code(state, site) != 0:
+                continue
+            row = state_to_row.get(set_site(state, site, 3))
+            if row is not None:
+                matrix[row, col] += int(signs[site])
+    return matrix
+
+
 def _site_twoSz_projection(code: int) -> int:
     if code == 1:
         return 1

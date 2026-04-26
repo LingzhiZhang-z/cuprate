@@ -12,6 +12,7 @@ STAGE_EMBED = "block_embed"
 DATA_FULL = "DATA"
 DATA_TWOSZ = "DATA_twoSz"
 DATA_TWOSZ_TWOS = "DATA_twoSz_twoS"
+DATA_TWOSZ_TWOS_ETA0 = "DATA_twoSz_twoS_eta_0"
 
 SCOPE_NONNEGATIVE = "nonnegative"
 SCOPE_PM = "pm"
@@ -45,14 +46,22 @@ def cluster_token(hole: int, class_idx: int, cluster_idx: int | None = None) -> 
     return label
 
 
-def block_token(twoSz: int | None, twoS: int | None = None) -> str:
+def block_token(
+    twoSz: int | None,
+    twoS: int | None = None,
+    eta: int | None = None,
+) -> str:
     if twoSz is None:
-        if twoS is not None:
-            raise ValueError("twoS requires twoSz in block token")
+        if twoS is not None or eta is not None:
+            raise ValueError("twoS/eta requires twoSz in block token")
         return "full"
+    if eta is not None and twoS is None:
+        raise ValueError("eta requires twoS in block token")
     label = f"twoSz_{int_token(twoSz)}"
     if twoS is not None:
         label += f"_twoS_{int_token(twoS)}"
+    if eta is not None:
+        label += f"_eta_{int_token(eta)}"
     return label
 
 
@@ -79,6 +88,8 @@ def canonical_mode(mode: str) -> str:
         return "Sz"
     if key == "szs2":
         return "SzS2"
+    if key == "szs2eta2":
+        return "SzS2eta2"
     raise ValueError(f"unsupported MODE={mode!r}")
 
 
@@ -101,7 +112,10 @@ def mode_spec(
         if twoSz is not None or twoS is not None:
             raise ValueError("MODE=full does not accept twoSz or twoS")
         if scope == SCOPE_PM:
-            raise ValueError("SCOPE=pm applies only to MODE=Sz or MODE=SzS2 without fixed twoSz")
+            raise ValueError(
+                "SCOPE=pm applies only to MODE=Sz, MODE=SzS2, "
+                "or MODE=SzS2eta2 without fixed twoSz"
+            )
         return ModeSpec(mode, "mode_full", "none", "none", scope=scope)
 
     if mode == "Sz":
@@ -121,17 +135,20 @@ def mode_spec(
             scope=scope,
         )
 
+    suffix = "_eta_0" if mode == "SzS2eta2" else ""
+
     if twoS is not None and twoSz is None:
-        raise ValueError("MODE=SzS2 requires twoSz when twoS is set")
+        raise ValueError(f"MODE={mode} requires twoSz when twoS is set")
     if twoSz is None:
         token = "mode_twoSz_pm_twoS" if scope == SCOPE_PM else "mode_twoSz_twoS"
+        token += suffix
         return ModeSpec(mode, token, "all", "all", scope=scope)
     if scope == SCOPE_PM:
         raise ValueError("SCOPE=pm applies only when twoSz is not fixed")
     if twoS is None:
         return ModeSpec(
             mode,
-            f"mode_twoSz_{int_token(twoSz)}_twoS",
+            f"mode_twoSz_{int_token(twoSz)}_twoS{suffix}",
             "one",
             "all",
             twoSz=twoSz,
@@ -141,7 +158,7 @@ def mode_spec(
         raise ValueError("twoS must be non-negative")
     return ModeSpec(
         mode,
-        f"mode_twoSz_{int_token(twoSz)}_twoS_{int_token(twoS)}",
+        f"mode_twoSz_{int_token(twoSz)}_twoS_{int_token(twoS)}{suffix}",
         "one",
         "one",
         twoSz=twoSz,
@@ -165,6 +182,8 @@ def data_dir_name(mode: str) -> str:
         return DATA_FULL
     if mode == "Sz":
         return DATA_TWOSZ
+    if mode == "SzS2eta2":
+        return DATA_TWOSZ_TWOS_ETA0
     return DATA_TWOSZ_TWOS
 
 

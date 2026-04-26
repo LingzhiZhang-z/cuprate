@@ -40,11 +40,13 @@ model.merge_by_s2()  # merge twoS sectors inside each twoSz
 model.merge_by_sz()  # merge fixed-twoSz blocks into one full block
 ```
 
-- Public canonical CLI modes are `full`, `Sz`, and `SzS2`.
+- Public canonical CLI modes are `full`, `Sz`, `SzS2`, and `SzS2eta2`.
 - Fixed `twoSz` and `twoS` values are separate optional selector parameters.
-- `SCOPE` controls the sector range for all-`twoSz` `MODE=Sz` and `MODE=SzS2`
-  runs; default `SCOPE=nonnegative` builds `twoSz >= 0`, while `SCOPE=pm`
-  builds both positive and negative `twoSz`.
+- `SCOPE` controls the sector range for all-`twoSz` `MODE=Sz`, `MODE=SzS2`,
+  and `MODE=SzS2eta2` runs; default `SCOPE=nonnegative` builds `twoSz >= 0`,
+  while `SCOPE=pm` builds both positive and negative `twoSz`.
+- `MODE=SzS2eta2` first follows the `MODE=SzS2` block selection rules, then
+  refines each selected `(twoSz,twoS)` block to `eta=0`.
 
 ## 3) Eigensystem Cache (MUST)
 
@@ -72,7 +74,7 @@ Code form:
 ```python
 cache = Path(cache_dir) / cluster.label()
 block.save(cache)
-block = Block.load(cache, twoSz, twoS)
+block = Block.load(cache, twoSz, twoS, eta)
 ```
 
 - Runtime path construction is centralized in `cuprate.paths`.
@@ -80,6 +82,8 @@ block = Block.load(cache, twoSz, twoS)
   - `DATA` for `MODE=full`.
   - `DATA_twoSz` for `MODE=Sz`, shared by default and `SCOPE=pm`.
   - `DATA_twoSz_twoS` for `MODE=SzS2`, shared by default and `SCOPE=pm`.
+  - `DATA_twoSz_twoS_eta_0` for `MODE=SzS2eta2`, shared by default and
+    `SCOPE=pm`.
 - `SCOPE=pm` does not create a separate eigensystem cache directory. It reuses
   the same block-keyed cache and may extend it via `CACHE_MODE=partial`.
 
@@ -144,11 +148,13 @@ MUST:
 - CLI keys are case-insensitive.
 - Canonical keys include:
   - `N`, `U`, `T`: physical parameters.
-  - `MODE`: one of `full`, `Sz`, or `SzS2`; defaults to `full`.
+  - `MODE`: one of `full`, `Sz`, `SzS2`, or `SzS2eta2`; defaults to `full`.
   - `twoSz`, `twoS`: optional fixed-block selectors. `twoS` requires
-    `MODE=SzS2` and a fixed `twoSz`.
+    `MODE=SzS2` or `MODE=SzS2eta2` and a fixed `twoSz`.
   - `SCOPE`: one of `nonnegative` or `pm`; defaults to `nonnegative` and applies
-    only to all-`twoSz` `MODE=Sz` / `MODE=SzS2` runs.
+    only to all-`twoSz` `MODE=Sz` / `MODE=SzS2` / `MODE=SzS2eta2` runs.
+  - `eta` is not a production CLI key. `MODE=SzS2eta2` currently calculates
+    `eta=0` blocks only.
   - `workflow`: one of `occ`, `energy`, `greedy`, `greedy_multi`, `adiabatic`;
     defaults to `occ`.
   - `CACHE_MODE`: one of `none`, `load`, `save`, `partial`; defaults to
@@ -183,8 +189,9 @@ MUST:
   `N_{N}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}`.
 - Main workflow outputs live under `mode_* / workflow_*`.
 - Default `SCOPE=nonnegative` uses the short all-`twoSz` path tokens
-  `mode_twoSz` and `mode_twoSz_twoS`.
-- Explicit `SCOPE=pm` uses `mode_twoSz_pm` and `mode_twoSz_pm_twoS`.
+  `mode_twoSz`, `mode_twoSz_twoS`, and `mode_twoSz_twoS_eta_0`.
+- Explicit `SCOPE=pm` uses `mode_twoSz_pm`, `mode_twoSz_pm_twoS`, and
+  `mode_twoSz_pm_twoS_eta_0`.
 - LCE and embed outputs live under `seed_<stem>`, where `<stem>` is the
   `SEED_SET` file stem.
 
@@ -194,6 +201,7 @@ ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/results.jso
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0/workflow_occ/results.json
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_pm/workflow_occ/results.json
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0_twoS_2/workflow_occ/results.json
+ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_twoS_eta_0/workflow_occ/results.json
 ROOT/seed_sets/block.txt
 ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/lce_results.json
 ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/seed_block/weights/N_2/hole0_class0_idx0.json

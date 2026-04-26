@@ -17,6 +17,9 @@ from cuprate import ATOL
 from cuprate.states import (
     calc_S_minus_matrix,
     calc_S_plus_matrix,
+    calc_eta_plus_matrix,
+    generate_states,
+    group_states,
     sort_states,
 )
 
@@ -28,6 +31,7 @@ class S2SectorBlock:
     D: int
     basis_states: list[int]
     transform: np.ndarray
+    eta: int | None = None
 
 
 # ── Small helpers ───────────────────────────────────────────
@@ -50,6 +54,26 @@ def _null_space(matrix):
 
 def _lowering_coeff(twoS, twoSz):
     return 0.5 * np.sqrt((twoS + twoSz) * (twoS - twoSz + 2))
+
+
+def _fixed_twoSz_bases(grouped_states, N):
+    basis = {}
+    basis_map = {}
+    for (twoSz, _D), states in grouped_states.items():
+        basis.setdefault(twoSz, []).extend(states)
+
+    for twoSz in basis:
+        basis[twoSz] = sort_states(basis[twoSz], N)
+        basis_map[twoSz] = {state: idx for idx, state in enumerate(basis[twoSz])}
+
+    return basis, basis_map
+
+
+def _sublattice_signs_square(cluster) -> np.ndarray:
+    return np.asarray(
+        [1 if (int(x) + int(y)) % 2 == 0 else -1 for x, y in cluster.sites],
+        dtype=int,
+    )
 
 
 # ── Core: group -> highest weight -> lower with S- ──────────
@@ -152,14 +176,7 @@ def build_S2_transforms(grouped_states, N, sector_blocks):
 
     Returns dict[(twoSz, twoS)] -> U in the fixed-twoSz Fock basis.
     """
-    basis = {}
-    basis_map = {}
-    for (twoSz, D), states in grouped_states.items():
-        basis.setdefault(twoSz, []).extend(states)
-
-    for twoSz in basis:
-        basis[twoSz] = sort_states(basis[twoSz], N)
-        basis_map[twoSz] = {state: idx for idx, state in enumerate(basis[twoSz])}
+    basis, basis_map = _fixed_twoSz_bases(grouped_states, N)
 
     blocks_by_sector = {}
     for block in sector_blocks:
@@ -181,6 +198,62 @@ def build_S2_transforms(grouped_states, N, sector_blocks):
         transformers[(twoSz, twoS)] = U
 
     return transformers
+
+
+def build_S2eta0_sectors(N, sector_blocks, cluster):
+    """Refine each fixed-(twoSz, twoS, D) block to eta=0 via eta+."""
+    signs = _sublattice_signs_square(cluster)
+    target_grouped = group_states(generate_states(N, N + 2), N)
+    eta0_sector_blocks = []
+
+    for block in sector_blocks:
+        transform = np.asarray(block.transform)
+        dst_states = target_grouped.get((block.twoSz, block.D + 1), [])
+        eta_plus = calc_eta_plus_matrix(block.basis_states, dst_states, N, signs)
+        kernel = _null_space(eta_plus @ transform)
+        if kernel.shape[1] == 0:
+            continue
+        eta0_sector_blocks.append(
+            S2SectorBlock(
+                twoSz=block.twoSz,
+                twoS=block.twoS,
+                D=block.D,
+                basis_states=block.basis_states,
+                transform=transform @ kernel,
+                eta=0,
+            )
+        )
+
+    eta0_sector_blocks.sort(key=lambda block: (block.twoSz, block.twoS, block.D))
+    return eta0_sector_blocks
+
+
+def build_S2eta0_transforms(grouped_states, N, eta0_sector_blocks):
+    """Assemble eta=0 sector blocks into fixed-(twoSz, twoS, eta) transforms."""
+    basis, basis_map = _fixed_twoSz_bases(grouped_states, N)
+
+    blocks_by_sector = {}
+    for block in eta0_sector_blocks:
+        if block.eta is None:
+            raise ValueError("build_S2eta0_transforms requires eta-labeled sector blocks")
+        blocks_by_sector.setdefault((block.twoSz, block.twoS, block.eta), []).append(
+            (block.basis_states, np.asarray(block.transform))
+        )
+
+    eta0_transforms = {}
+    for (twoSz, twoS, eta), blocks in blocks_by_sector.items():
+        n_rows = len(basis[twoSz])
+        n_cols = sum(coeff_block.shape[1] for _states_block, coeff_block in blocks)
+        U = np.zeros((n_rows, n_cols), dtype=complex)
+        col_start = 0
+        for states_block, coeff_block in blocks:
+            indices = [basis_map[twoSz][state] for state in states_block]
+            col_stop = col_start + coeff_block.shape[1]
+            U[np.ix_(indices, range(col_start, col_stop))] = coeff_block
+            col_start = col_stop
+        eta0_transforms[(twoSz, twoS, eta)] = U
+
+    return eta0_transforms
 
 
 def _format_complex(value):
@@ -239,4 +312,3 @@ def load_S2_blocks(filename):
                 )
             )
     return sector_blocks
-

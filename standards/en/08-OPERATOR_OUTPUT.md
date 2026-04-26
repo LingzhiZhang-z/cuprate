@@ -111,7 +111,7 @@ MUST:
 
   Projection:
     method={workflow} artifact={projection_npz}
-    block={block} twoSz={twoSz|all} twoS={twoS|all} spin_dim={d} selected={d}
+    block={block} twoSz={twoSz|all} twoS={twoS|all} eta={eta|all} spin_dim={d} selected={d}
       selected_indices=...
 
   Fit:
@@ -206,6 +206,7 @@ MUST:
       "MODE": "full",
       "twoSz": null,
       "twoS": null,
+      "eta": null,
       "SCOPE": "nonnegative",
       "workflow": "greedy",
       "parameter_token": "N_4_nelec_4_U_1.0000_t_0.2400",
@@ -240,6 +241,7 @@ MUST:
           "block": "full",
           "twoSz": null,
           "twoS": null,
+          "eta": null,
           "selected_indices": [0, 1, 2, 3],
           "t11_minus_1_norm": 0.0,
           "overlap": null,
@@ -309,7 +311,8 @@ MUST:
   `sites[k]`. The current representative-reordered cluster enumeration normally
   writes `[0, 1, ..., N-1]`.
 - Each entry in `projection.blocks` records selected eigenvector column indices
-  in that block's solved eigenvector frame.
+  in that block's solved eigenvector frame. `eta` is null outside
+  `MODE=SzS2eta2` and is `0` for the first eta-refined implementation.
 - `run_params.SCOPE` is required and must match across main inputs consumed by
   LCE and embed workflows.
 - For `workflow=adiabatic`, `run_params.adiabatic_seed` records the seed

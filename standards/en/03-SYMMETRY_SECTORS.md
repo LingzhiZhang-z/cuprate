@@ -84,7 +84,85 @@ U = transforms[(twoSz, twoS)]
 H_S2 = U.conj().T @ H_Sz @ U
 ```
 
-## 5) Full Spectrum Reconstruction (MUST)
+## 5) Half-Filled Eta-Pseudospin Refinement (MUST)
+
+MUST:
+- `MODE=SzS2eta2` constructs `eta=0` blocks from the rectangular `eta_plus`
+  operator and validates them with the fixed-sector `eta2` operator.
+- The rectangular `eta_plus` matrix maps
+  `H(Ne=N, twoSz) -> H(Ne=N+2, twoSz)`. The `twoSz` label is unchanged because
+  one spin-up and one spin-down electron are added together.
+- The square-lattice sublattice signs are `epsilon_i = (-1) ** (x_i + y_i)`.
+  The eta diagnostic is valid only when every hopping bond satisfies
+  `epsilon_i * epsilon_j == -1`.
+- This sign check is a geometry check. The production eta diagnostic assumes
+  the current real nearest-neighbor hopping convention; complex hopping phases
+  must be treated as unsupported unless the commutator validation below passes.
+- In the fixed half-filled basis, `eta2` may be built directly: each basis
+  state receives a diagonal contribution equal to the number of empty sites,
+  and each empty/doublon site pair contributes a doublon move with coefficient
+  `epsilon_i * epsilon_j`.
+- The direct fixed-sector `eta2` construction is the validation construction.
+  It must be tested by Hermiticity, eigenvalue quantisation, commutator,
+  pure-spin, and projected zero-block checks.
+- `MODE=SzS2eta2` is a refinement of `MODE=SzS2`: first build fixed
+  `(twoSz, twoS, D)` sector blocks, apply `eta_plus` to the S2 columns, then
+  keep its kernel.
+- In the first runtime implementation, `MODE=SzS2eta2` keeps only `eta=0`
+  blocks for calculation. It does not classify or output nonzero eta sectors.
+- `twoSz` and `twoS` remain optional selectors exactly as in `MODE=SzS2`.
+  With neither selector set, the mode builds all default-scope `(twoSz,twoS)`
+  blocks and refines each one to `eta=0`.
+- A refined block label appends `eta_<value>` after the `(twoSz,twoS)` label,
+  for example `twoSz_0_twoS_0_eta_0`.
+- Production code exposes eta only through the sector transform builder
+  `build_S2eta0_sectors(...)` followed by `build_S2eta0_transforms(...)`.
+
+Math:
+$$
+\eta^+ = \sum_i \epsilon_i c^\dagger_{i\uparrow}c^\dagger_{i\downarrow},
+\qquad
+\eta^- = (\eta^+)^\dagger,
+\qquad
+\eta^z = \tfrac{1}{2}(N_e - N).
+$$
+At half filling, $\eta^z = 0$, and the fixed-sector operator is:
+$$
+\eta^2 = \eta^-\eta^+.
+$$
+For a half-filled Fock state $|s\rangle$:
+$$
+\eta^2|s\rangle =
+|E(s)|\,|s\rangle +
+\sum_{i\in E(s)}\sum_{j\in D(s)}
+\epsilon_i\epsilon_j
+|s_{i:0\to3,\ j:3\to0}\rangle.
+$$
+
+Code form:
+```python
+grouped_states = group_states(generate_states(N, N), N)
+_hw, multiplets = build_S2_multiplets(grouped_states, N)
+sector_blocks = build_S2_sectors(grouped_states, multiplets)
+eta0_sector_blocks = build_S2eta0_sectors(N, sector_blocks, cluster)
+eta0_transforms = build_S2eta0_transforms(grouped_states, N, eta0_sector_blocks)
+U_S2eta0 = eta0_transforms[(twoSz, twoS, 0)]
+H_S2eta0 = U_S2eta0.conj().T @ H_Sz @ U_S2eta0
+```
+
+Validation:
+- `eta2` must be Hermitian and positive semidefinite.
+- `eta2` eigenvalues must match `eta * (eta + 1)` within tolerance.
+- For valid bipartite nearest-neighbor Hubbard hopping,
+  `H @ eta2 - eta2 @ H` must vanish within tolerance in both the full
+  half-filled basis and each fixed-`twoSz` basis.
+- Pure-spin `D = 0` basis rows and columns must be annihilated by `eta2`.
+- After projection with any valid `S2` transform, eta cross blocks between
+  different `twoS` sectors must vanish within tolerance.
+- In `MODE=SzS2eta2`, each produced block must have `eta == 0` and satisfy
+  `U.conj().T @ eta2 @ U == 0` within tolerance.
+
+## 6) Full Spectrum Reconstruction (MUST)
 
 MUST:
 - Sector eigensystems stay as `Block` objects until the caller explicitly merges them.
@@ -97,7 +175,7 @@ MUST:
 
 Code form:
 ```python
-model.merge_by_s2()  # SzS2 -> Sz frame
+model.merge_by_s2()  # SzS2 -> Sz frame; SzS2eta2 only after all eta sectors exist
 model.merge_by_sz()  # Sz -> full frame
 ```
 
@@ -105,10 +183,10 @@ Validation:
 - Reconstructed eigenvalue count must equal full Hilbert-space dimension $\binom{2N}{N}$.
 - Reconstruction from the default `SCOPE=nonnegative` block set must fail.
 
-## 6) Diagonalisation Modes (MUST)
+## 7) Diagonalisation Modes (MUST)
 
 MUST:
-- The code supports exactly three `MODE` values plus optional block selectors:
+- The code supports exactly four `MODE` values plus optional block selectors:
 
 | CLI input | Blocks before optional merge | Optional reconstruction |
 |-----------|------------------------------|-------------------------|
@@ -120,6 +198,10 @@ MUST:
 | `MODE=SzS2 twoSz=<value>` | all `twoS` blocks at one fixed `twoSz` | optional `merge_by_s2()` |
 | `MODE=SzS2` | fixed-`(twoSz,twoS)` blocks with `twoSz >= 0` | No full reconstruction |
 | `MODE=SzS2 SCOPE=pm` | all fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
+| `MODE=SzS2eta2 twoSz=<value> twoS=<value>` | one fixed-`(twoSz,twoS,eta=0)` block | No |
+| `MODE=SzS2eta2 twoSz=<value>` | all `twoS` blocks at one fixed `twoSz`, each refined to `eta=0` | No |
+| `MODE=SzS2eta2` | default-scope fixed-`(twoSz,twoS,eta=0)` blocks | No full reconstruction |
+| `MODE=SzS2eta2 SCOPE=pm` | all fixed-`(twoSz,twoS,eta=0)` blocks for all positive and negative `twoSz` | No full reconstruction until nonzero eta sectors are supported |
 
 - Projection and spin fitting are per current `Block` frame. They are not
   prohibited by S2-resolved modes; the caller is responsible for choosing the block
@@ -131,4 +213,5 @@ MUST:
 Code form:
 ```python
 model.set_symmetry("SzS2", twoSz=0, twoS=0, scope="nonnegative")
+model.set_symmetry("SzS2eta2", scope="nonnegative")
 ```

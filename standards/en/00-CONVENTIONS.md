@@ -60,11 +60,16 @@ MUST:
   all-`twoSz` sector-range parameter name is `SCOPE`.
 - Standards and implementation must not introduce alternative canonical names such as
   `ssq`, `s_squared`, `sz`, or `s` for these quantities.
-- The only canonical CLI `MODE` spellings are `full`, `Sz`, and `SzS2`.
+- The only canonical CLI `MODE` spellings are `full`, `Sz`, `SzS2`, and
+  `SzS2eta2`.
 - `MODE` chooses the diagonalization block layer. Optional `twoSz` and `twoS`
   CLI parameters choose a specific block subset inside that layer.
-- `SCOPE` chooses the sector range only for all-`twoSz` `MODE=Sz` and `MODE=SzS2`
-  runs. Valid values are `nonnegative` and `pm`.
+- `SCOPE` chooses the sector range only for all-`twoSz` `MODE=Sz`,
+  `MODE=SzS2`, and `MODE=SzS2eta2` runs. Valid values are `nonnegative`
+  and `pm`.
+- `eta` is the canonical eta-pseudospin integer label. In the first
+  `MODE=SzS2eta2` implementation, runtime calculation keeps only `eta=0`
+  blocks; there is no public `eta` CLI selector.
 - Canonical runtime path tokens are:
   - `N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>`
   - `twoSz_<value>` (negative values use `n` prefix: `twoSz_n1` for $-1$)
@@ -77,6 +82,11 @@ MUST:
   - `mode_twoSz_pm_twoS`
   - `mode_twoSz_<value>_twoS`
   - `mode_twoSz_<value>_twoS_<value>`
+  - `mode_twoSz_twoS_eta_0`
+  - `mode_twoSz_pm_twoS_eta_0`
+  - `mode_twoSz_<value>_twoS_eta_0`
+  - `mode_twoSz_<value>_twoS_<value>_eta_0`
+  - `eta_<value>` in block labels after `twoS_<value>`
   - `seed_<stem>` for LCE/embed outputs selected by a `SEED_SET` text file
 - Path `mode_*` tokens are output directory names, not accepted CLI `MODE`
   values.
@@ -89,11 +99,11 @@ MUST:
 
 Code form:
 ```text
-canonical physics names: twoSz, twoS, S2
+canonical physics names: twoSz, twoS, S2, eta, eta2
 canonical workflow key: workflow
 canonical LCE/embed input key: SEED_SET
 canonical all-twoSz scope key: SCOPE
-canonical CLI modes: full, Sz, SzS2
+canonical CLI modes: full, Sz, SzS2, SzS2eta2
 canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*, seed_*
 negative value encoding: n prefix (e.g. twoSz_n1 = twoSz = -1)
 ```
