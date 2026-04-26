@@ -62,6 +62,7 @@ def parse_args(argv: list[str]) -> WorkchainParams:
         mode=common.mode,
         twoSz=common.twoSz,
         twoS=common.twoS,
+        scope=common.scope,
         workflow=common.workflow,
         root=common.root,
         cache_mode=cache_mode,

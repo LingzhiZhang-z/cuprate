@@ -10,7 +10,7 @@ from scipy.linalg import block_diag
 
 from cuprate.clusters import Cluster
 from cuprate.manifold import Block
-from cuprate.paths import ModeSpec, mode_spec
+from cuprate.paths import SCOPE_NONNEGATIVE, SCOPE_PM, ModeSpec, mode_spec
 from cuprate.sectors import build_S2_multiplets, build_S2_sectors, build_S2_transforms
 from cuprate.states import apply_hop, count_double_occ, generate_states, group_states
 
@@ -80,8 +80,9 @@ class HubbardModel:
         mode: str,
         twoSz: int | None,
         twoS: int | None,
+        scope: str | None,
     ) -> ModeSpec:
-        spec = mode_spec(mode, twoSz=twoSz, twoS=twoS)
+        spec = mode_spec(mode, twoSz=twoSz, twoS=twoS, scope=scope)
         if spec.twoSz is not None:
             if abs(spec.twoSz) > self.N:
                 raise ValueError("twoSz must satisfy |twoSz| <= N")
@@ -135,15 +136,18 @@ class HubbardModel:
         *,
         twoSz: int | None = None,
         twoS: int | None = None,
+        scope: str | None = SCOPE_NONNEGATIVE,
     ) -> "HubbardModel":
-        spec = self._validate_mode(mode, twoSz, twoS)
+        spec = self._validate_mode(mode, twoSz, twoS, scope)
         sz_scope, s2_scope = spec.twoSz_scope, spec.twoS_scope
         transforms = self._s2_transforms() if s2_scope != "none" else None
+        all_twoSz = list(self._twoSz_values())
+        scoped_twoSz = all_twoSz if spec.scope == SCOPE_PM else [value for value in all_twoSz if value >= 0]
 
         sz_iter = {
             "none": [None],
             "one": [spec.twoSz],
-            "all": list(self._twoSz_values()),
+            "all": scoped_twoSz,
         }[sz_scope]
 
         if s2_scope == "none":
@@ -297,7 +301,13 @@ class HubbardModel:
 
         self.blocks = merged
         self.mode = "Sz"
-        self._mode_spec = mode_spec("Sz", twoSz=merged[0].twoSz if len(merged) == 1 else None)
+        previous_spec = getattr(self, "_mode_spec", None)
+        previous_scope = SCOPE_NONNEGATIVE if previous_spec is None else previous_spec.scope
+        self._mode_spec = mode_spec(
+            "Sz",
+            twoSz=merged[0].twoSz if len(merged) == 1 else None,
+            scope=previous_scope if len(merged) != 1 else SCOPE_NONNEGATIVE,
+        )
         return self
 
     def merge_by_sz(self) -> "HubbardModel":
@@ -316,6 +326,10 @@ class HubbardModel:
                 raise RuntimeError("merge_by_sz requires solved sectors with ham set")
             if sector.twoSz is None or sector.twoS is not None or sector.basis_transform is not None:
                 raise ValueError("merge_by_sz requires fixed-twoSz blocks without S² transforms")
+        actual_twoSz = {sector.twoSz for sector in sectors}
+        expected_twoSz = set(self._twoSz_values())
+        if actual_twoSz != expected_twoSz:
+            raise ValueError("merge_by_sz requires the complete positive and negative twoSz set")
 
         basis_states = [state for sector in sectors for state in sector.basis_states]
         ham = block_diag(*[sector.ham for sector in sectors])

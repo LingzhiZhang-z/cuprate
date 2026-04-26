@@ -25,7 +25,7 @@ MUST:
 Code form:
 ```python
 model = HubbardModel(cluster, U, t)
-model.set_symmetry(mode, twoSz=twoSz, twoS=twoS)
+model.set_symmetry(mode, twoSz=twoSz, twoS=twoS, scope=scope)
 model.build_hamiltonians()
 model.solve(cache_mode=cache_mode, cache_dir=cache_dir)
 model.project(method=workflow, **select_kwargs)
@@ -42,6 +42,9 @@ model.merge_by_sz()  # merge fixed-twoSz blocks into one full block
 
 - Public canonical CLI modes are `full`, `Sz`, and `SzS2`.
 - Fixed `twoSz` and `twoS` values are separate optional selector parameters.
+- `SCOPE` controls the sector range for all-`twoSz` `MODE=Sz` and `MODE=SzS2`
+  runs; default `SCOPE=nonnegative` builds `twoSz >= 0`, while `SCOPE=pm`
+  builds both positive and negative `twoSz`.
 
 ## 3) Eigensystem Cache (MUST)
 
@@ -75,8 +78,10 @@ block = Block.load(cache, twoSz, twoS)
 - Runtime path construction is centralized in `cuprate.paths`.
 - Eigensystem data directories are:
   - `DATA` for `MODE=full`.
-  - `DATA_twoSz` for `MODE=Sz`.
-  - `DATA_twoSz_twoS` for `MODE=SzS2`.
+  - `DATA_twoSz` for `MODE=Sz`, shared by default and `SCOPE=pm`.
+  - `DATA_twoSz_twoS` for `MODE=SzS2`, shared by default and `SCOPE=pm`.
+- `SCOPE=pm` does not create a separate eigensystem cache directory. It reuses
+  the same block-keyed cache and may extend it via `CACHE_MODE=partial`.
 
 Code form:
 ```text
@@ -142,6 +147,8 @@ MUST:
   - `MODE`: one of `full`, `Sz`, or `SzS2`; defaults to `full`.
   - `twoSz`, `twoS`: optional fixed-block selectors. `twoS` requires
     `MODE=SzS2` and a fixed `twoSz`.
+  - `SCOPE`: one of `nonnegative` or `pm`; defaults to `nonnegative` and applies
+    only to all-`twoSz` `MODE=Sz` / `MODE=SzS2` runs.
   - `workflow`: one of `occ`, `energy`, `greedy`, `greedy_multi`, `adiabatic`;
     defaults to `occ`.
   - `CACHE_MODE`: one of `none`, `load`, `save`, `partial`; defaults to
@@ -159,7 +166,7 @@ MUST:
 - `cuprate.embed` must read the corresponding `lce_results.json` manifest and
   its referenced weight files.
 - The standard does not permit production keys `TYPE`, `SZ`, `S`, `S2`,
-  `SZ_IDX`, `S_IDX`, `SELECT`, or `MATCH_SPIN_SECTORS`.
+  `SZ_IDX`, `S_IDX`, `BLOCKS`, `SELECT`, or `MATCH_SPIN_SECTORS`.
 
 ## 8) Runtime Directory Contract (MUST)
 
@@ -171,11 +178,15 @@ MUST:
 - The common parameter directory token is
   `N_{N}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}`.
 - Workflow outputs live under `mode_* / workflow_*`.
+- Default `SCOPE=nonnegative` uses the short all-`twoSz` path tokens
+  `mode_twoSz` and `mode_twoSz_twoS`.
+- Explicit `SCOPE=pm` uses `mode_twoSz_pm` and `mode_twoSz_pm_twoS`.
 
 Code form:
 ```text
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/results.json
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0/workflow_occ/results.json
+ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_pm/workflow_occ/results.json
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0_twoS_2/workflow_occ/results.json
 ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/lce_results.json
 ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.json

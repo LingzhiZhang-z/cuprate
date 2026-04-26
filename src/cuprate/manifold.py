@@ -182,11 +182,16 @@ class Block:
         return len(self.spin_sector_columns())
 
     def t11_norm(self, selected: Sequence[int]) -> float:
+        # ||U Σ U† - I||_F = ||σ - 1||_2 by unitary invariance of Frobenius norm.
         spin_sector_columns = self.spin_sector_columns()
+        if len(selected) != len(spin_sector_columns):
+            raise ValueError(
+                f"t11_norm needs exactly spin_dim={len(spin_sector_columns)} selected "
+                f"eigenstates, got {len(selected)}."
+            )
         s_bd = self.eigvecs[np.ix_(spin_sector_columns, selected)]
-        U, sigma, _ = np.linalg.svd(s_bd, full_matrices=False)
-        t11m1 = U @ np.diag(sigma) @ U.conj().T - np.eye(s_bd.shape[0])
-        return float(np.linalg.norm(t11m1.flatten()))
+        sigma = np.linalg.svd(s_bd, compute_uv=False)
+        return float(np.linalg.norm(sigma - 1.0))
 
     def double_occ_expectation(self) -> np.ndarray:
         dom = calc_double_occupation_matrix(self.basis_states, self.N)
@@ -220,9 +225,21 @@ class Block:
         return double_occ, eigvals, selected, candidates
 
     def _greedy_swap(self, selected, candidates):
+        # Cache spin_sector_columns and the spin-projected eigvec slice once;
+        # score each trial via ||σ - 1|| with compute_uv=False to skip the
+        # full SVD reconstruction. Batched / Gram-based scoring was tried and
+        # was slower for spin_dim ≲ 32 (fancy-indexing + eigvalsh dispatch
+        # overhead dominated). Stick with the simple per-trial SVD path.
         selected = selected.copy()
         candidates = candidates.copy()
-        best_norm = self.t11_norm(selected)
+        spin_cols = self.spin_sector_columns()
+        eigvecs_spin = self.eigvecs[spin_cols, :]
+
+        def _norm(sel) -> float:
+            sigma = np.linalg.svd(eigvecs_spin[:, sel], compute_uv=False)
+            return float(np.linalg.norm(sigma - 1.0))
+
+        best_norm = _norm(selected)
 
         for selected_pos in range(len(selected)):
             best_candidate_pos = None
@@ -232,7 +249,7 @@ class Block:
                     candidates[candidate_pos],
                     selected[selected_pos],
                 )
-                norm = self.t11_norm(selected)
+                norm = _norm(selected)
                 selected[selected_pos], candidates[candidate_pos] = (
                     candidates[candidate_pos],
                     selected[selected_pos],

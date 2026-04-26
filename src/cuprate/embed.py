@@ -30,6 +30,7 @@ class EmbedParams:
     mode: str
     twoSz: int | None
     twoS: int | None
+    scope: str
     workflow: str
 
 
@@ -70,6 +71,7 @@ def parse_args(argv: list[str]) -> EmbedParams:
         mode=common.mode,
         twoSz=common.twoSz,
         twoS=common.twoS,
+        scope=common.scope,
         workflow=common.workflow,
     )
 
@@ -77,6 +79,9 @@ def parse_args(argv: list[str]) -> EmbedParams:
 def run_embed(params: EmbedParams) -> dict[str, Any]:
     lce_path = _lce_manifest_path(params)
     lce_manifest, records = _load_lce_weights(lce_path)
+    lce_scope = lce_manifest.get("run_params", {}).get("SCOPE")
+    if lce_scope != params.scope:
+        raise ValueError(f"{lce_path} has SCOPE={lce_scope!r}, expected {params.scope!r}")
     orientation_cache = {
         record.identity(): _distinct_parent_orientations(record.sites)
         for record in records
@@ -93,6 +98,7 @@ def run_embed(params: EmbedParams) -> dict[str, Any]:
         params.workflow,
         twoSz=params.twoSz,
         twoS=params.twoS,
+        scope=params.scope,
     )
 
     two_site_entries = _two_site_entries(params.N, records, orientation_cache)
@@ -122,6 +128,7 @@ def _lce_manifest_path(params: EmbedParams) -> Path:
             params.workflow,
             twoSz=params.twoSz,
             twoS=params.twoS,
+            scope=params.scope,
         )
         / LCE_RESULTS_FILE
     )

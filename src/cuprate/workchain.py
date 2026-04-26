@@ -39,6 +39,7 @@ class WorkchainParams:
     mode: str
     twoSz: int | None
     twoS: int | None
+    scope: str
     workflow: str
     root: Path
     cache_mode: str = "save"
@@ -68,6 +69,7 @@ def run_workchain(params: WorkchainParams) -> dict[str, Any] | None:
         params.workflow,
         twoSz=params.twoSz,
         twoS=params.twoS,
+        scope=params.scope,
     )
     exchanges_dir = output_dir / "exchanges"
     clusters_dir = output_dir / "clusters"
@@ -117,7 +119,7 @@ def _process_family(
     family_start = time.perf_counter()
 
     model = HubbardModel(representative, params.U, params.t)
-    model.set_symmetry(params.mode, twoSz=params.twoSz, twoS=params.twoS)
+    model.set_symmetry(params.mode, twoSz=params.twoSz, twoS=params.twoS, scope=params.scope)
     model.build_hamiltonians()
     cache_dir = (
         main_data_dir(params.root, params.N, params.N, params.U, params.t, params.mode)

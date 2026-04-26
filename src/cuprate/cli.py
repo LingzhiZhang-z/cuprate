@@ -16,6 +16,7 @@ COMMON_KEYS = {
     "mode": "MODE",
     "twosz": "twoSz",
     "twos": "twoS",
+    "scope": "SCOPE",
     "workflow": "workflow",
 }
 REQUIRED_COMMON_KEYS = {"N", "U", "T"}
@@ -31,6 +32,7 @@ class RuntimeArgs:
     mode: str
     twoSz: int | None
     twoS: int | None
+    scope: str
     workflow: str
 
 
@@ -61,7 +63,7 @@ def parse_common_runtime(raw: dict[str, str]) -> RuntimeArgs:
     t = parse_float(raw["T"], "T")
     twoSz = parse_optional_int(raw, "twoSz")
     twoS = parse_optional_int(raw, "twoS")
-    spec = mode_spec(raw.get("MODE", "full"), twoSz=twoSz, twoS=twoS)
+    spec = mode_spec(raw.get("MODE", "full"), twoSz=twoSz, twoS=twoS, scope=raw.get("SCOPE"))
     _validate_mode_args(N, spec)
 
     workflow = raw.get("workflow", "occ").lower()
@@ -76,6 +78,7 @@ def parse_common_runtime(raw: dict[str, str]) -> RuntimeArgs:
         mode=spec.mode,
         twoSz=spec.twoSz,
         twoS=spec.twoS,
+        scope=spec.scope,
         workflow=workflow,
     )
 

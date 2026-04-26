@@ -17,7 +17,7 @@ They are not organized by the current Python module layout.
 | 00 | `00-CONVENTIONS.md` | Writing rules, symbol table, naming conventions, numerical tolerances |
 | 01 | `01-CLUSTERS.md` | Square-lattice enumeration, weighted-graph classification, bond types, multi-site patterns |
 | 02 | `02-HAMILTONIAN.md` | Fock-state encoding, basis construction, single-band Hubbard Hamiltonian, diagonalisation |
-| 03 | `03-SYMMETRY_SECTORS.md` | $S_z$ blocking, $S^2$ basis transform, spectrum reconstruction, diagonalisation modes |
+| 03 | `03-SYMMETRY_SECTORS.md` | $S_z$ blocking, $S^2$ basis transform, spectrum reconstruction, scope-aware modes |
 | 04 | `04-DOWNFOLDING.md` | Eigenstate selection, $T_{11}$, $H_{\text{eff}}$ via SVD, spin-coupling fit |
 | 05 | `05-LCE_AND_EMBEDDING.md` | Linked-cluster expansion, embed output |
 | 06 | `06-RUNTIME.md` | Workchain, solve cache, derived-output ownership |

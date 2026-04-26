@@ -55,20 +55,25 @@ MUST:
 - 实际物理运算仍使用半整数值 $S_z = twoSz / 2$ 和 $S = twoS / 2$。
   整数形式仅用于标签。
 - `S2`（$= S(S+1)$）是计算得到的浮点数，不是整数标签。
-- 规范的运行时工作流参数名为 `workflow`。
+- 规范的运行时工作流参数名为 `workflow`；规范的 all-`twoSz`
+  扇区范围参数名为 `SCOPE`。
 - 标准和实现中不得引入替代规范名称，如
   `ssq`、`s_squared`、`sz` 或 `s`。
 - 唯一允许的 CLI `MODE` 拼写为 `full`、`Sz` 和 `SzS2`。
 - `MODE` 只选择对角化分块层级；可选 CLI 参数 `twoSz` 和 `twoS`
   在该层级内选择具体 block 子集。
+- `SCOPE` 只为 all-`twoSz` 的 `MODE=Sz` 和 `MODE=SzS2` 运行选择扇区范围。
+  合法值为 `nonnegative` 和 `pm`。
 - 规范的运行时路径标记为：
   - `N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>`
   - `twoSz_<value>`（负值使用 `n` 前缀：`twoSz_n1` 表示 $-1$）
   - `twoS_<value>`（`twoS` 始终非负，无需 `n` 前缀）
   - `mode_full`
   - `mode_twoSz`
+  - `mode_twoSz_pm`
   - `mode_twoSz_<value>`
   - `mode_twoSz_twoS`
+  - `mode_twoSz_pm_twoS`
   - `mode_twoSz_<value>_twoS`
   - `mode_twoSz_<value>_twoS_<value>`
 - 路径里的 `mode_*` token 是输出目录名，不是 CLI `MODE` 输入值。
@@ -81,6 +86,7 @@ Code form:
 ```text
 canonical physics names: twoSz, twoS, S2
 canonical workflow key: workflow
+canonical all-twoSz scope key: SCOPE
 canonical CLI modes: full, Sz, SzS2
 canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*
 negative value encoding: n prefix (e.g. twoSz_n1 = twoSz = -1)

@@ -13,6 +13,10 @@ DATA_FULL = "DATA"
 DATA_TWOSZ = "DATA_twoSz"
 DATA_TWOSZ_TWOS = "DATA_twoSz_twoS"
 
+SCOPE_NONNEGATIVE = "nonnegative"
+SCOPE_PM = "pm"
+SUPPORTED_SCOPES = {SCOPE_NONNEGATIVE, SCOPE_PM}
+
 RESULTS_FILE = "results.json"
 LCE_RESULTS_FILE = "lce_results.json"
 LCE_SUMMARY_FILE = "lce_summary.txt"
@@ -60,6 +64,7 @@ class ModeSpec:
     twoS_scope: str
     twoSz: int | None = None
     twoS: int | None = None
+    scope: str = SCOPE_NONNEGATIVE
 
 
 def parameter_token(N: int, nelec: int, U: float, t: float) -> str:
@@ -77,28 +82,52 @@ def canonical_mode(mode: str) -> str:
     raise ValueError(f"unsupported MODE={mode!r}")
 
 
+def canonical_scope(scope: str | None = None) -> str:
+    value = SCOPE_NONNEGATIVE if scope is None else scope.strip().lower()
+    if value not in SUPPORTED_SCOPES:
+        raise ValueError(f"unsupported SCOPE={scope!r}")
+    return value
+
+
 def mode_spec(
     mode: str,
     twoSz: int | None = None,
     twoS: int | None = None,
+    scope: str | None = None,
 ) -> ModeSpec:
     mode = canonical_mode(mode)
+    scope = canonical_scope(scope)
     if mode == "full":
         if twoSz is not None or twoS is not None:
             raise ValueError("MODE=full does not accept twoSz or twoS")
-        return ModeSpec(mode, "mode_full", "none", "none")
+        if scope == SCOPE_PM:
+            raise ValueError("SCOPE=pm applies only to MODE=Sz or MODE=SzS2 without fixed twoSz")
+        return ModeSpec(mode, "mode_full", "none", "none", scope=scope)
 
     if mode == "Sz":
         if twoS is not None:
             raise ValueError("MODE=Sz does not accept twoS")
         if twoSz is None:
-            return ModeSpec(mode, "mode_twoSz", "all", "none")
-        return ModeSpec(mode, f"mode_twoSz_{int_token(twoSz)}", "one", "none", twoSz=twoSz)
+            token = "mode_twoSz_pm" if scope == SCOPE_PM else "mode_twoSz"
+            return ModeSpec(mode, token, "all", "none", scope=scope)
+        if scope == SCOPE_PM:
+            raise ValueError("SCOPE=pm applies only when twoSz is not fixed")
+        return ModeSpec(
+            mode,
+            f"mode_twoSz_{int_token(twoSz)}",
+            "one",
+            "none",
+            twoSz=twoSz,
+            scope=scope,
+        )
 
     if twoS is not None and twoSz is None:
         raise ValueError("MODE=SzS2 requires twoSz when twoS is set")
     if twoSz is None:
-        return ModeSpec(mode, "mode_twoSz_twoS", "all", "all")
+        token = "mode_twoSz_pm_twoS" if scope == SCOPE_PM else "mode_twoSz_twoS"
+        return ModeSpec(mode, token, "all", "all", scope=scope)
+    if scope == SCOPE_PM:
+        raise ValueError("SCOPE=pm applies only when twoSz is not fixed")
     if twoS is None:
         return ModeSpec(
             mode,
@@ -106,6 +135,7 @@ def mode_spec(
             "one",
             "all",
             twoSz=twoSz,
+            scope=scope,
         )
     if twoS < 0:
         raise ValueError("twoS must be non-negative")
@@ -116,6 +146,7 @@ def mode_spec(
         "one",
         twoSz=twoSz,
         twoS=twoS,
+        scope=scope,
     )
 
 
@@ -123,8 +154,9 @@ def mode_token(
     mode: str,
     twoSz: int | None = None,
     twoS: int | None = None,
+    scope: str | None = None,
 ) -> str:
-    return mode_spec(mode, twoSz=twoSz, twoS=twoS).token
+    return mode_spec(mode, twoSz=twoSz, twoS=twoS, scope=scope).token
 
 
 def data_dir_name(mode: str) -> str:
@@ -173,10 +205,11 @@ def workflow_dir(
     workflow: str,
     twoSz: int | None = None,
     twoS: int | None = None,
+    scope: str | None = None,
 ) -> Path:
     return (
         stage_parameter_dir(root, stage, N, nelec, U, t)
-        / mode_token(mode, twoSz=twoSz, twoS=twoS)
+        / mode_token(mode, twoSz=twoSz, twoS=twoS, scope=scope)
         / workflow_token(workflow)
     )
 

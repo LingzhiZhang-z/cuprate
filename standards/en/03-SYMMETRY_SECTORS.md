@@ -7,7 +7,9 @@ $S_z$ blocking, fixed-$S_z$ diagonalisation of $S^2$, and optional spectrum reco
 MUST:
 - At half filling on $N$ sites, $S_z$ takes values from $-N/2$ to $N/2$ in integer steps
   (half-integer steps if $N$ is odd).
-- All valid `twoSz` sectors are built directly when an all-`Sz` mode is requested.
+- All-`twoSz` modes use `SCOPE` to choose the sector range:
+  `SCOPE=nonnegative` builds valid `twoSz >= 0` sectors, while `SCOPE=pm`
+  builds all valid positive and negative `twoSz` sectors.
 - Each $S_z$ sector has dimension $\binom{N}{N_\uparrow} \cdot \binom{N}{N_\downarrow}$
   where $N_\uparrow = N/2 + S_z$, $N_\downarrow = N/2 - S_z$.
 - Runtime inputs and path names use the canonical integer labels `twoSz = 2 S_z`
@@ -15,7 +17,7 @@ MUST:
 
 Code form:
 ```python
-twoSz_values = range(-N, N + 1, 2)
+twoSz_values = [twoSz for twoSz in range(-N, N + 1, 2) if scope == "pm" or twoSz >= 0]
 states = generate_states(N, N, twoSz=twoSz)
 ```
 
@@ -90,7 +92,8 @@ MUST:
   by building block-diagonal sector matrices and transforming them back to the
   fixed-`twoSz` Fock basis.
 - `HubbardModel.merge_by_sz()` merges all fixed-`twoSz` Fock-coordinate blocks
-  into one full Fock-coordinate block.
+  into one full Fock-coordinate block only when the model contains the complete
+  valid positive and negative `twoSz` set.
 
 Code form:
 ```python
@@ -100,6 +103,7 @@ model.merge_by_sz()  # Sz -> full frame
 
 Validation:
 - Reconstructed eigenvalue count must equal full Hilbert-space dimension $\binom{2N}{N}$.
+- Reconstruction from the default `SCOPE=nonnegative` block set must fail.
 
 ## 6) Diagonalisation Modes (MUST)
 
@@ -110,18 +114,21 @@ MUST:
 |-----------|------------------------------|-------------------------|
 | `MODE=full` | one full Fock block | N/A |
 | `MODE=Sz twoSz=<value>` | one fixed-`twoSz` block | No |
-| `MODE=Sz` | all fixed-`twoSz` blocks | `merge_by_sz()` |
+| `MODE=Sz` | fixed-`twoSz` blocks with `twoSz >= 0` | No full reconstruction |
+| `MODE=Sz SCOPE=pm` | all fixed-`twoSz` blocks | `merge_by_sz()` |
 | `MODE=SzS2 twoSz=<value> twoS=<value>` | one fixed-`(twoSz,twoS)` block | No |
 | `MODE=SzS2 twoSz=<value>` | all `twoS` blocks at one fixed `twoSz` | optional `merge_by_s2()` |
-| `MODE=SzS2` | all fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
+| `MODE=SzS2` | fixed-`(twoSz,twoS)` blocks with `twoSz >= 0` | No full reconstruction |
+| `MODE=SzS2 SCOPE=pm` | all fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
 
 - Projection and spin fitting are per current `Block` frame. They are not
   prohibited by S2-resolved modes; the caller is responsible for choosing the block
   frame whose fitted operators answer the intended physics question.
 - Fixed `twoSz` and `twoS` values are separate optional selectors, not part of
   `MODE`.
+- `SCOPE` applies only when `twoSz` is not explicitly specified.
 
 Code form:
 ```python
-model.set_symmetry("SzS2", twoSz=0, twoS=0)
+model.set_symmetry("SzS2", twoSz=0, twoS=0, scope="nonnegative")
 ```

@@ -12,11 +12,12 @@
 - `twoS` (not `two_s`, `s`, `S`)
 - `S2` for S² (not `s_squared`, `ssq`, `SSquared`)
 - CLI `MODE` strings: `full`, `Sz`, `SzS2`
-- Path mode tokens: `mode_full`, `mode_twoSz`, `mode_twoSz_<value>`,
-  `mode_twoSz_twoS`, `mode_twoSz_<value>_twoS`,
+- Path mode tokens: `mode_full`, `mode_twoSz`, `mode_twoSz_pm`,
+  `mode_twoSz_<value>`, `mode_twoSz_twoS`, `mode_twoSz_pm_twoS`,
+  `mode_twoSz_<value>_twoS`,
   `mode_twoSz_<value>_twoS_<value>`
 - Path tokens: `twoSz_<value>`, `twoS_<value>`, negative uses `n` prefix (`twoSz_n1`)
-- CLI: `workflow` (not `TYPE`)
+- CLI: `workflow` (not `TYPE`), `SCOPE=nonnegative|pm` for all-`twoSz` scope
 
 ## Standards structure
 
@@ -41,7 +42,8 @@
 - Runtime mode token logic is centralized in `paths.py`; shared `KEY=VALUE`
   CLI parsing and runtime defaults are in `cli.py`. `hubbard.py` consumes the
   parsed mode spec. `MODE` chooses the block layer, while optional `twoSz` and
-  `twoS` choose a specific block subset.
+  `twoS` choose a specific block subset, and `SCOPE` chooses default nonnegative
+  versus positive/negative all-`twoSz` enumeration.
 - Read `states.py`:
   it defines the Fock basis, sorting, double occupation, state-space `Sz`/`S2` operators, and fermionic signs — the primitives consumed by `hubbard.py`.
 - Read `sectors.py` after that:
@@ -80,10 +82,12 @@
 |------|------------------------------|-------------------------|
 | `full` | One full Fock block | N/A |
 | `Sz, twoSz=<value>` | One fixed-`twoSz` block | No |
-| `Sz` | All fixed-`twoSz` blocks | `merge_by_sz()` |
+| `Sz` | Fixed-`twoSz` blocks with `twoSz >= 0` | No full reconstruction |
+| `Sz, SCOPE=pm` | All fixed-`twoSz` blocks | `merge_by_sz()` |
 | `SzS2, twoSz=<value>, twoS=<value>` | One fixed-`(twoSz,twoS)` block | No |
 | `SzS2, twoSz=<value>` | All `twoS` blocks at one fixed `twoSz` | optional `merge_by_s2()` |
-| `SzS2` | All fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
+| `SzS2` | Fixed-`(twoSz,twoS)` blocks with `twoSz >= 0` | No full reconstruction |
+| `SzS2, SCOPE=pm` | All fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
 
 ## Do not modify tests without explicit request
 

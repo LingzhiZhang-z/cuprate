@@ -16,7 +16,7 @@
 | 00 | `00-CONVENTIONS.md` | 书写规则、符号表、命名约定、数值容差 |
 | 01 | `01-CLUSTERS.md` | 方格子枚举、加权图分类、键类型、多格点模式 |
 | 02 | `02-HAMILTONIAN.md` | Fock 态编码、基矢构建、单带 Hubbard 哈密顿量、对角化 |
-| 03 | `03-SYMMETRY_SECTORS.md` | $S_z$ 分块、$S^2$ 基矢变换、谱重构、对角化模式 |
+| 03 | `03-SYMMETRY_SECTORS.md` | $S_z$ 分块、$S^2$ 基矢变换、谱重构、带 `SCOPE` 范围控制的对角化模式 |
 | 04 | `04-DOWNFOLDING.md` | 本征态选择、$T_{11}$、SVD 降维至 $H_{\text{eff}}$、自旋耦合拟合 |
 | 05 | `05-LCE_AND_EMBEDDING.md` | 链接团簇展开、embed 输出 |
 | 06 | `06-RUNTIME.md` | Workchain、solve cache、派生输出归属 |

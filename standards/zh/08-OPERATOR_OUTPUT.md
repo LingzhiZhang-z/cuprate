@@ -193,6 +193,7 @@ MUST:
       "MODE": "full",
       "twoSz": null,
       "twoS": null,
+      "SCOPE": "nonnegative",
       "workflow": "greedy",
       "parameter_token": "N_4_nelec_4_U_1.0000_t_0.2400",
       "mode_token": "mode_full",
@@ -296,6 +297,8 @@ MUST:
   `[0, 1, ..., N-1]`。
 - `projection.blocks` 中的每个条目记录该 block 已求解本征向量框架中的
   selected eigenvector column indices。
+- `run_params.SCOPE` 是必需字段，并且所有被 LCE 和 embed workflow 消费的
+  main 输入都必须具有相同的 `SCOPE`。
 - 对于 `workflow=adiabatic`，`run_params.adiabatic_seed` 记录 seed
   `results.json` 路径、seed schema version、seed run parameters 和 seed workflow。
   `projection.blocks` 中每个条目还记录它的 seed block label 和 seed selected indices。

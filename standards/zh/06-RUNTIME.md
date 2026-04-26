@@ -23,7 +23,7 @@ MUST:
 Code form:
 ```python
 model = HubbardModel(cluster, U, t)
-model.set_symmetry(mode, twoSz=twoSz, twoS=twoS)
+model.set_symmetry(mode, twoSz=twoSz, twoS=twoS, scope=scope)
 model.build_hamiltonians()
 model.solve(cache_mode=cache_mode, cache_dir=cache_dir)
 model.project(method=workflow, **select_kwargs)
@@ -40,6 +40,9 @@ model.merge_by_sz()  # 将 fixed-twoSz 块合并成一个 full 块
 
 - 公共规范 CLI 模式为 `full`、`Sz` 和 `SzS2`。
 - 固定 `twoSz` 和 `twoS` 数值是独立可选 selector 参数。
+- `SCOPE` 控制 all-`twoSz` 的 `MODE=Sz` 和 `MODE=SzS2` 运行中的扇区范围；
+  默认 `SCOPE=nonnegative` 构造 `twoSz >= 0`，`SCOPE=pm` 构造正负
+  `twoSz`。
 
 ## 3) 本征系统 Cache (MUST)
 
@@ -70,8 +73,10 @@ block = Block.load(cache, twoSz, twoS)
 - 运行时路径构造集中在 `cuprate.paths`。
 - 本征系统数据目录为：
   - `DATA`：`MODE=full`。
-  - `DATA_twoSz`：`MODE=Sz`。
-  - `DATA_twoSz_twoS`：`MODE=SzS2`。
+  - `DATA_twoSz`：`MODE=Sz`，默认 scope 和 `SCOPE=pm` 共享。
+  - `DATA_twoSz_twoS`：`MODE=SzS2`，默认 scope 和 `SCOPE=pm` 共享。
+- `SCOPE=pm` 不创建单独的本征系统 cache 目录。它复用按 block key
+  区分的同一 cache，并可通过 `CACHE_MODE=partial` 补齐缺失 block。
 
 Code form:
 ```text
@@ -130,6 +135,8 @@ MUST:
   - `MODE`：`full`、`Sz` 或 `SzS2` 之一；默认 `full`。
   - `twoSz`、`twoS`：可选固定 block selector。`twoS` 要求
     `MODE=SzS2` 且固定 `twoSz`。
+  - `SCOPE`：`nonnegative` 或 `pm` 之一；默认 `nonnegative`，只作用于
+    all-`twoSz` 的 `MODE=Sz` / `MODE=SzS2` 运行。
   - `workflow`：`occ`、`energy`、`greedy`、`greedy_multi`、`adiabatic` 之一；
     默认 `occ`。
   - `CACHE_MODE`：`none`、`load`、`save`、`partial` 之一；默认 `save`。
@@ -145,7 +152,7 @@ MUST:
 - `cuprate.embed` 入口必须读取对应的 `lce_results.json` manifest 以及它引用的
   weight 文件。
 - 标准不允许生产 key `TYPE`、`SZ`、`S`、`S2`、`SZ_IDX`、`S_IDX`、
-  `SELECT` 或 `MATCH_SPIN_SECTORS`。
+  `BLOCKS`、`SELECT` 或 `MATCH_SPIN_SECTORS`。
 
 ## 8) 运行时目录契约 (MUST)
 
@@ -157,11 +164,15 @@ MUST:
 - 通用 parameter directory token 是
   `N_{N}_nelec_{nelec}_U_{U:.4f}_t_{T:.4f}`。
 - Workflow 输出位于 `mode_* / workflow_*` 下。
+- 默认 `SCOPE=nonnegative` 使用短 all-`twoSz` 路径 token：
+  `mode_twoSz` 和 `mode_twoSz_twoS`。
+- 显式 `SCOPE=pm` 使用 `mode_twoSz_pm` 和 `mode_twoSz_pm_twoS`。
 
 Code form:
 ```text
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/results.json
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0/workflow_occ/results.json
+ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_pm/workflow_occ/results.json
 ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/mode_twoSz_0_twoS_2/workflow_occ/results.json
 ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/lce_results.json
 ROOT/block_lce/N_6_nelec_6_U_1.0000_t_0.0200/mode_full/workflow_occ/weights/hole0_class0_idx0.json

@@ -56,20 +56,25 @@ MUST:
 - Actual physics computation still uses the half-integer values
   $S_z = twoSz / 2$ and $S = twoS / 2$. The integer form is only for labelling.
 - `S2` ($= S(S+1)$) is a computed float, not an integer label.
-- The canonical runtime workflow parameter name is `workflow`.
+- The canonical runtime workflow parameter name is `workflow`; the canonical
+  all-`twoSz` sector-range parameter name is `SCOPE`.
 - Standards and implementation must not introduce alternative canonical names such as
   `ssq`, `s_squared`, `sz`, or `s` for these quantities.
 - The only canonical CLI `MODE` spellings are `full`, `Sz`, and `SzS2`.
 - `MODE` chooses the diagonalization block layer. Optional `twoSz` and `twoS`
   CLI parameters choose a specific block subset inside that layer.
+- `SCOPE` chooses the sector range only for all-`twoSz` `MODE=Sz` and `MODE=SzS2`
+  runs. Valid values are `nonnegative` and `pm`.
 - Canonical runtime path tokens are:
   - `N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>`
   - `twoSz_<value>` (negative values use `n` prefix: `twoSz_n1` for $-1$)
   - `twoS_<value>` (`twoS` is always non-negative, no `n` prefix needed)
   - `mode_full`
   - `mode_twoSz`
+  - `mode_twoSz_pm`
   - `mode_twoSz_<value>`
   - `mode_twoSz_twoS`
+  - `mode_twoSz_pm_twoS`
   - `mode_twoSz_<value>_twoS`
   - `mode_twoSz_<value>_twoS_<value>`
 - Path `mode_*` tokens are output directory names, not accepted CLI `MODE`
@@ -83,6 +88,7 @@ Code form:
 ```text
 canonical physics names: twoSz, twoS, S2
 canonical workflow key: workflow
+canonical all-twoSz scope key: SCOPE
 canonical CLI modes: full, Sz, SzS2
 canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*
 negative value encoding: n prefix (e.g. twoSz_n1 = twoSz = -1)

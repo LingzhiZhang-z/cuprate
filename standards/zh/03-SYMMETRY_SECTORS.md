@@ -7,14 +7,16 @@ $S_z$ 分块、固定 $S_z$ 上的 $S^2$ 对角化，以及可选的全谱重构
 MUST:
 - 半填充 $N$ 个格点时，$S_z$ 取值从 $-N/2$ 到 $N/2$，步长为整数
   （$N$ 为奇数时为半整数步长）。
-- 当请求 all-`Sz` 模式时，直接构造所有合法的 `twoSz` 扇区。
+- all-`twoSz` 模式使用 `SCOPE` 选择扇区范围：`SCOPE=nonnegative`
+  构造合法的 `twoSz >= 0` 扇区，`SCOPE=pm` 构造所有合法的正负
+  `twoSz` 扇区。
 - 每个 $S_z$ 扇区的维度为 $\binom{N}{N_\uparrow} \cdot \binom{N}{N_\downarrow}$，
   其中 $N_\uparrow = N/2 + S_z$，$N_\downarrow = N/2 - S_z$。
 - 运行时输入和路径名使用规范整数标签 `twoSz = 2 S_z` 和 `twoS = 2 S`。
 
 Code form:
 ```python
-twoSz_values = range(-N, N + 1, 2)
+twoSz_values = [twoSz for twoSz in range(-N, N + 1, 2) if scope == "pm" or twoSz >= 0]
 states = generate_states(N, N, twoSz=twoSz)
 ```
 
@@ -86,7 +88,8 @@ MUST:
 - 扇区本征系统保持为 `Block` 对象，直到调用者显式合并它们。
 - `HubbardModel.merge_by_s2()` 合并同一 `twoSz` 下的所有 `twoS` 扇区：
   先构造块对角的扇区矩阵，再变换回固定 `twoSz` 的 Fock 基。
-- `HubbardModel.merge_by_sz()` 将所有固定 `twoSz` 的 Fock 坐标块合并成一个完整 Fock 坐标块。
+- `HubbardModel.merge_by_sz()` 只有在模型包含完整合法的正负 `twoSz`
+  集合时，才将所有固定 `twoSz` 的 Fock 坐标块合并成一个完整 Fock 坐标块。
 
 Code form:
 ```python
@@ -96,6 +99,7 @@ model.merge_by_sz()  # Sz -> full frame
 
 Validation:
 - 重构的本征值数量必须等于完整 Hilbert 空间维度 $\binom{2N}{N}$。
+- 从默认 `SCOPE=nonnegative` block 集合出发的重构必须失败。
 
 ## 6) 对角化模式 (MUST)
 
@@ -106,16 +110,19 @@ MUST:
 |----------|----------------|----------|
 | `MODE=full` | 一个完整 Fock 块 | 不适用 |
 | `MODE=Sz twoSz=<value>` | 一个固定 `twoSz` 块 | 否 |
-| `MODE=Sz` | 所有固定 `twoSz` 块 | `merge_by_sz()` |
+| `MODE=Sz` | `twoSz >= 0` 的固定 `twoSz` 块 | 不做 full 重构 |
+| `MODE=Sz SCOPE=pm` | 所有固定 `twoSz` 块 | `merge_by_sz()` |
 | `MODE=SzS2 twoSz=<value> twoS=<value>` | 一个固定 `(twoSz,twoS)` 块 | 否 |
 | `MODE=SzS2 twoSz=<value>` | 固定 `twoSz` 下的所有 `twoS` 块 | 可选 `merge_by_s2()` |
-| `MODE=SzS2` | 所有固定 `(twoSz,twoS)` 块 | 先 `merge_by_s2()`，再 `merge_by_sz()` |
+| `MODE=SzS2` | `twoSz >= 0` 的固定 `(twoSz,twoS)` 块 | 不做 full 重构 |
+| `MODE=SzS2 SCOPE=pm` | 所有固定 `(twoSz,twoS)` 块 | 先 `merge_by_s2()`，再 `merge_by_sz()` |
 
 - Projection 和 spin fitting 都在当前 `Block` 坐标框架内逐块执行。
   S2 分辨的模式本身不禁止拟合；调用者负责选择能回答目标物理问题的块框架。
 - 固定 `twoSz` 和 `twoS` 数值是独立可选 selector，不编码在 `MODE` 里。
+- `SCOPE` 只在没有显式指定 `twoSz` 时生效。
 
 Code form:
 ```python
-model.set_symmetry("SzS2", twoSz=0, twoS=0)
+model.set_symmetry("SzS2", twoSz=0, twoS=0, scope="nonnegative")
 ```

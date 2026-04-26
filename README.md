@@ -54,11 +54,16 @@ Common CLI parameters:
 N, U, T        Required physical parameters
 MODE           full | Sz | SzS2; default: full
 twoSz, twoS    Optional fixed-sector selectors; twoS requires MODE=SzS2
+SCOPE          nonnegative | pm; default: nonnegative for all-twoSz Sz/SzS2 runs
 workflow       occ | energy | greedy | greedy_multi | adiabatic; default: occ
 ROOT           Output root directory; default: results
 CACHE_MODE     none | load | save | partial; main default: save
 SEED_RESULTS   Previous results.json for workflow=adiabatic
 ```
+
+For all-`twoSz` `MODE=Sz` / `MODE=SzS2` runs, default `SCOPE=nonnegative`
+builds only `twoSz >= 0` sectors. Use `SCOPE=pm` to build both positive and
+negative `twoSz` sectors. Explicit selectors such as `twoSz=-2` are unaffected.
 
 Output directory shape:
 
@@ -67,6 +72,11 @@ ROOT/block_main/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/
 ROOT/block_lce/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/
 ROOT/block_embed/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/mode_*/workflow_*/
 ```
+
+Default all-`twoSz` output paths use `mode_twoSz` / `mode_twoSz_twoS`; `SCOPE=pm`
+uses `mode_twoSz_pm` / `mode_twoSz_pm_twoS`. The solve cache remains shared:
+`DATA_twoSz` and `DATA_twoSz_twoS` are keyed by concrete block labels, so
+`CACHE_MODE=partial` can extend a default cache with missing negative sectors.
 
 Key outputs:
 

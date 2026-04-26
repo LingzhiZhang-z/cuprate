@@ -7,10 +7,11 @@ S2/
 .DS_Store
 .vscode/
 .cursor/
+.claude/
 tmp/
 Block/
 data_transfer/
 data_test/
 docs/
 src/cuprate/back/
-results
+results*

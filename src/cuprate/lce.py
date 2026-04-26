@@ -29,7 +29,7 @@ from cuprate.operators import (
 )
 
 
-COMMON_RUN_PARAM_KEYS = ("U", "T", "MODE", "twoSz", "twoS", "workflow")
+COMMON_RUN_PARAM_KEYS = ("U", "T", "MODE", "twoSz", "twoS", "SCOPE", "workflow")
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,7 @@ class LCEParams:
     mode: str
     twoSz: int | None
     twoS: int | None
+    scope: str
     workflow: str
 
 
@@ -85,13 +86,14 @@ def parse_args(argv: list[str]) -> LCEParams:
         mode=common.mode,
         twoSz=common.twoSz,
         twoS=common.twoS,
+        scope=common.scope,
         workflow=common.workflow,
     )
 
 
 def run_lce(params: LCEParams) -> dict[str, Any]:
     input_paths = _input_paths(params)
-    records_by_n, common_params = _load_input_records(input_paths)
+    records_by_n, common_params = _load_input_records(input_paths, expected_scope=params.scope)
     _compute_lce(records_by_n)
 
     output_dir = workflow_dir(
@@ -105,6 +107,7 @@ def run_lce(params: LCEParams) -> dict[str, Any]:
         params.workflow,
         twoSz=params.twoSz,
         twoS=params.twoS,
+        scope=params.scope,
     )
     return write_lce_outputs(
         output_dir=output_dir,
@@ -128,6 +131,7 @@ def _input_paths(params: LCEParams) -> list[Path]:
             params.workflow,
             twoSz=params.twoSz,
             twoS=params.twoS,
+            scope=params.scope,
         )
         / RESULTS_FILE
         for N in range(2, params.N + 1)
@@ -136,6 +140,8 @@ def _input_paths(params: LCEParams) -> list[Path]:
 
 def _load_input_records(
     input_paths: list[Path],
+    *,
+    expected_scope: str,
 ) -> tuple[dict[int, list[ClusterRecord]], dict[str, Any]]:
     records_by_n: dict[int, list[ClusterRecord]] = {}
     common_params: dict[str, Any] | None = None
@@ -153,6 +159,10 @@ def _load_input_records(
             raise ValueError(f"{path} is a partial main output and cannot be used for LCE")
 
         run_params = payload["run_params"]
+        if run_params.get("SCOPE") != expected_scope:
+            raise ValueError(
+                f"{path} has SCOPE={run_params.get('SCOPE')!r}, expected {expected_scope!r}"
+            )
         N = int(run_params["N"])
         if N in records_by_n:
             raise ValueError(f"duplicate input for N={N}")
@@ -160,7 +170,7 @@ def _load_input_records(
         if common_params is None:
             common_params = current_common
         elif current_common != common_params:
-            raise ValueError("all inputs must share U/T/MODE/twoSz/twoS/workflow")
+            raise ValueError("all inputs must share U/T/MODE/twoSz/twoS/SCOPE/workflow")
 
         records = _records_from_manifest(path, N, payload)
         records.sort(key=lambda record: (record.hole, record.class_idx, record.cluster_idx))

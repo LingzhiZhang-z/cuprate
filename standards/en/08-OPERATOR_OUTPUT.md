@@ -206,6 +206,7 @@ MUST:
       "MODE": "full",
       "twoSz": null,
       "twoS": null,
+      "SCOPE": "nonnegative",
       "workflow": "greedy",
       "parameter_token": "N_4_nelec_4_U_1.0000_t_0.2400",
       "mode_token": "mode_full",
@@ -309,6 +310,8 @@ MUST:
   writes `[0, 1, ..., N-1]`.
 - Each entry in `projection.blocks` records selected eigenvector column indices
   in that block's solved eigenvector frame.
+- `run_params.SCOPE` is required and must match across main inputs consumed by
+  LCE and embed workflows.
 - For `workflow=adiabatic`, `run_params.adiabatic_seed` records the seed
   `results.json` path, seed schema version, seed run parameters, and seed
   workflow. Each entry in `projection.blocks` also records its seed block label
