@@ -2,12 +2,14 @@
 __pycache__/
 *.pyc
 *.egg-info/
+.pytest_cache
 S2/
 .DS_Store
 .vscode/
+.cursor/
 tmp/
 Block/
 data_transfer/
 data_test/
-docs/pdf/
+docs/
 src/cuprate/back/
