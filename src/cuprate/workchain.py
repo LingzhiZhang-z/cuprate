@@ -31,6 +31,35 @@ from cuprate.operators import terms_from_fit
 SUPPORTED_WORKFLOWS = {"occ", "energy", "greedy", "greedy_multi", "adiabatic"}
 
 
+def _format_duration(seconds: float) -> str:
+    if seconds < 60.0:
+        return f"{seconds:.1f}s"
+    minutes, sec = divmod(int(round(seconds)), 60)
+    if minutes < 60:
+        return f"{minutes}m{sec:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m{sec:02d}s"
+
+
+def _print_progress(message: str) -> None:
+    print(f"[main-progress] {message}", flush=True)
+
+
+def _family_label(family: tuple[tuple[int, int], list[Cluster]]) -> str:
+    (hole, class_idx), members = family
+    return f"hole={hole} class={class_idx} members={len(members)}"
+
+
+def _rank0_progress_line(done: int, total: int, started_at: float) -> str:
+    elapsed = time.perf_counter() - started_at
+    eta = 0.0 if done <= 0 else (elapsed / done) * (total - done)
+    return (
+        f"rank0_progress={done}/{total} "
+        f"elapsed={_format_duration(elapsed)} "
+        f"ETA={_format_duration(eta)}"
+    )
+
+
 @dataclass(frozen=True)
 class WorkchainParams:
     N: int
@@ -81,12 +110,33 @@ def run_workchain(params: WorkchainParams) -> dict[str, Any] | None:
 
     families = _enumerate_families(params.N) if rank == 0 else None
     families = comm.bcast(families, root=0)
+    assert families is not None
+
+    total_families = len(families)
+    local_families = families[rank::size]
+    workchain_start = time.perf_counter()
+    if rank == 0:
+        _print_progress(
+            f"start N={params.N} U={params.U:g} T={params.t:g} "
+            f"mode={params.mode} workflow={params.workflow} "
+            f"families={total_families} mpi_size={size} "
+            f"rank0_families={len(local_families)}"
+        )
 
     local_entries: list[dict[str, Any]] = []
-    for family in families[rank::size]:
+    for local_index, family in enumerate(local_families, start=1):
+        label = _family_label(family)
+        family_start = time.perf_counter()
         local_entries.append(
             _process_family(params, family, exchanges_dir, clusters_dir, artifacts_dir, seed_context)
         )
+        family_elapsed = time.perf_counter() - family_start
+        if rank == 0:
+            _print_progress(
+                f"{_rank0_progress_line(local_index, len(local_families), workchain_start)} "
+                f"total_families={total_families} {label} "
+                f"family_time={_format_duration(family_elapsed)}"
+            )
 
     gathered = comm.gather(local_entries, root=0)
     if rank != 0:
@@ -95,7 +145,12 @@ def run_workchain(params: WorkchainParams) -> dict[str, Any] | None:
     entries = [entry for batch in gathered for entry in batch]
     entries.sort(key=lambda entry: (entry["hole"], entry["class_idx"]))
 
-    return write_main_manifest(output_dir, params, entries, seed_context)
+    manifest = write_main_manifest(output_dir, params, entries, seed_context)
+    _print_progress(
+        f"done families={len(entries)}/{total_families} "
+        f"total_time={_format_duration(time.perf_counter() - workchain_start)}"
+    )
+    return manifest
 
 
 def _enumerate_families(N: int) -> list[tuple[tuple[int, int], list[Cluster]]]:
