@@ -60,9 +60,9 @@ Common CLI parameters:
 
 ```text
 N, U, T        Required physical parameters
-MODE           full | Sz | SzS2; default: full
-twoSz, twoS    Optional fixed-sector selectors; twoS requires MODE=SzS2
-SCOPE          nonnegative | pm; default: nonnegative for all-twoSz Sz/SzS2 runs
+MODE           full | Sz | SzS2 | SzS2eta2; default: full
+twoSz, twoS    Optional fixed-sector selectors; twoS requires MODE=SzS2 or SzS2eta2
+SCOPE          nonnegative | pm; default: nonnegative for all-twoSz Sz/SzS2/SzS2eta2 runs
 workflow       occ | energy | greedy | greedy_multi | adiabatic; default: occ
 ROOT           Output root directory; default: results
 CACHE_MODE     none | load | save | partial; main default: save
@@ -83,8 +83,11 @@ ROOT/block_embed/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/seed_<stem>/
 ```
 
 Default all-`twoSz` output paths use `mode_twoSz` / `mode_twoSz_twoS`; `SCOPE=pm`
-uses `mode_twoSz_pm` / `mode_twoSz_pm_twoS`. The solve cache remains shared:
-`DATA_twoSz` and `DATA_twoSz_twoS` are keyed by concrete block labels, so
+uses `mode_twoSz_pm` / `mode_twoSz_pm_twoS`. `MODE=SzS2eta2` adds an `_eta_0`
+suffix (e.g. `mode_twoSz_twoS_eta_0`, `mode_twoSz_pm_twoS_eta_0`) and refines
+each `(twoSz, twoS)` block to the eta-pairing kernel; the solve cache mirrors
+this with `DATA_twoSz_twoS_eta_0`. The solve cache remains shared:
+`DATA_twoSz` / `DATA_twoSz_twoS` are keyed by concrete block labels, so
 `CACHE_MODE=partial` can extend a default cache with missing negative sectors.
 
 Key outputs:
@@ -103,6 +106,23 @@ Key outputs:
 - `block_embed/.../clusters/*.txt`: embedded multi-site target couplings.
 
 Text files are inspection sidecars only. Downstream stages read JSON/NPZ.
+
+## Diagnostics and Plotting
+
+Helper scripts under `scripts/` consume the JSON/NPZ outputs only:
+
+- `plot_regression.py` — per-(block, family) projection diagnostics
+  (eigvals, ⟨D⟩, ‖T₁₁−I‖, relative error, optional adiabatic overlap) with
+  per-combo total panels.
+- `plot_jps_figures.py` — matplotlib renderer that mirrors the JPS-slide
+  figure style (dominant J₁/Jc, subdominant J₂/J₃, comparison panels with the
+  Cuprates t/U region marked).
+- `plot_embed_vs_perturbation.py` — gnuplot renderer for embed couplings
+  versus 4th-order perturbation theory: absolute meV panels for J₁/Jc, ratio
+  panels for J₂/J₃ and a comparison-R panel; uses `_pert_formulas.py` as the
+  user-editable reference.
+- `gen_nmax_seeds.py` / `run_embed_convergence.sh` — drive an Nmax=2..6
+  embed convergence series by truncating canonical seed-set files.
 
 ## Code Structure
 

@@ -134,7 +134,14 @@ MUST:
   vector `b`.
 - It stacks the corresponding per-block spin-operator columns into `A`.
 - It solves `A x = b` with `np.linalg.lstsq`.
-- It reports relative error, residual norm, and $R^2$.
+- It reports relative error, residual norm, and $R^2$ for the global fit.
+- It also reports per-block fit metrics: for each block it slices the residual
+  vector `A x - b` to that block's `H_eff.flatten()` rows and records
+  `residual = ||residual_block||_2` and `relative_error = residual / ||b_block||_2`.
+- The per-block metrics are stored on `HubbardModel.fit_metrics_per_block` as a
+  list of `{"residual": ..., "relative_error": ...}` dicts aligned with
+  `model.blocks`. The result-output layer serializes them into each entry of
+  `projection.blocks`; see `08-OPERATOR_OUTPUT.md` §6.
 - If no `bond_groups` are supplied, it fits all current two-site, four-site, and
   six-site groups generated from the model's `Cluster`.
 
@@ -143,6 +150,8 @@ Code form:
 A = np.vstack([block._spin_operators(bonds) for block in model.blocks])
 b = np.concatenate([heff.flatten() for heff in model.heff])
 x = np.linalg.lstsq(A, b, rcond=None)[0]
+# per-block residual slice (one entry per block in model.blocks order)
+model.fit_metrics_per_block  # [{"residual": ..., "relative_error": ...}, ...]
 ```
 
 ## 8) Persistence Boundary (MUST)

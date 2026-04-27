@@ -243,8 +243,13 @@ MUST:
           "twoS": null,
           "eta": null,
           "selected_indices": [0, 1, 2, 3],
+          "selected_state_count": 4,
+          "spin_dim": 4,
+          "heff_dimension": [4, 4],
           "t11_minus_1_norm": 0.0,
           "overlap": null,
+          "residual": 0.0,
+          "relative_error": 0.0,
           "selection_info": {}
         }
       ]
@@ -313,6 +318,13 @@ MUST:
 - Each entry in `projection.blocks` records selected eigenvector column indices
   in that block's solved eigenvector frame. `eta` is null outside
   `MODE=SzS2eta2` and is `0` for the first eta-refined implementation.
+- Each `projection.blocks` entry also records the per-block fit slice as
+  `residual = ||(A x - b)_block||_2` and
+  `relative_error = residual / ||b_block||_2`, sourced from
+  `HubbardModel.fit_metrics_per_block` (see `04-DOWNFOLDING.md` §7). The
+  global fit metrics under `fit` remain authoritative for the family-level
+  summary; per-block fields are diagnostics that locate which block dominates
+  the residual.
 - `run_params.SCOPE` is required and must match across main inputs consumed by
   LCE and embed workflows.
 - For `workflow=adiabatic`, `run_params.adiabatic_seed` records the seed
