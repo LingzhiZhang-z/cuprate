@@ -16,10 +16,20 @@ and writes four PNGs similar to the result plots in the JPS slides:
 from __future__ import annotations
 
 import argparse
+import csv
 import math
+import os
 import re
 from pathlib import Path
 
+os.environ.setdefault("XDG_CACHE_HOME", "/tmp/cuprate-cache")
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/cuprate-matplotlib")
+Path(os.environ["XDG_CACHE_HOME"]).mkdir(parents=True, exist_ok=True)
+Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
+
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -27,6 +37,8 @@ import numpy as np
 U_VALUE = 1.0
 WORKFLOWS = ("occ", "greedy_multi", "adiabatic")
 DEFAULT_NMAXES = (2, 3, 4, 5, 6)
+CUPRATE_T_LOW = 0.10
+CUPRATE_T_HIGH = 0.155
 
 COLORS = {
     2: "#b85c00",
@@ -157,6 +169,11 @@ def key_label(key: tuple) -> str:
     return f"shape={shape}, pairs={pair_text}"
 
 
+def key_short_label(key: tuple) -> str:
+    _, pairs = key
+    return " ".join(f"{a}-{b}" for a, b in pairs)
+
+
 def extract_jc(cluster_dir: Path) -> tuple[float, float] | None:
     if not cluster_dir.is_dir():
         return None
@@ -236,7 +253,42 @@ def setup_axis(ax, *, xlabel: str = "t/U", ylabel: str = "", xlim: tuple[float, 
     ax.tick_params(direction="in", top=True, right=True)
 
 
-def plot_dominant(data, outdir: Path, workflow: str, nmaxes: tuple[int, ...], ts: list[float], tmax: float):
+def add_cuprates_bar(ax, *, y: float = 0.035):
+    transform = ax.get_xaxis_transform()
+    ax.plot(
+        [CUPRATE_T_LOW, CUPRATE_T_HIGH],
+        [y, y],
+        transform=transform,
+        color="black",
+        linewidth=5,
+        solid_capstyle="round",
+        clip_on=False,
+    )
+    ax.text(
+        0.5 * (CUPRATE_T_LOW + CUPRATE_T_HIGH),
+        y + 0.04,
+        "Cuprates",
+        transform=transform,
+        ha="center",
+        va="bottom",
+        fontsize=10,
+    )
+
+
+def save_fig(fig, outdir: Path, name: str, dpi: int):
+    fig.savefig(outdir / name, dpi=dpi)
+    plt.close(fig)
+
+
+def plot_dominant(
+    data,
+    outdir: Path,
+    workflow: str,
+    nmaxes: tuple[int, ...],
+    ts: list[float],
+    tmax: float,
+    dpi: int,
+):
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), constrained_layout=True)
     t_dense = np.linspace(0.0, tmax, 300)
 
@@ -252,6 +304,7 @@ def plot_dominant(data, outdir: Path, workflow: str, nmaxes: tuple[int, ...], ts
     ax.plot(t_dense, [jc_parallel_pt(t) * 1000.0 for t in t_dense], color="#f5a000", linewidth=2.3, label="PT parallel")
     ax.plot(t_dense, [jc_cross_pt(t) * 1000.0 for t in t_dense], color="#f5a000", linewidth=2.3, linestyle="--", label="PT cross")
     setup_axis(ax, ylabel="Jc / meV", xlim=(0.0, tmax))
+    add_cuprates_bar(ax)
     ax.set_title("Four-site plaquette exchange")
     ax.legend(fontsize=7, ncol=2)
 
@@ -261,15 +314,23 @@ def plot_dominant(data, outdir: Path, workflow: str, nmaxes: tuple[int, ...], ts
         ax.plot(ts, vals, "o-", color=COLORS.get(nmax), label=f"N={nmax}")
     ax.plot(t_dense, [j1_pt(t) * 1000.0 for t in t_dense], color="#f5a000", linewidth=2.5, label="PT")
     setup_axis(ax, ylabel="J1 / meV", xlim=(0.0, tmax))
+    add_cuprates_bar(ax)
     ax.set_title("Nearest-neighbor exchange")
     ax.legend(fontsize=8)
 
     fig.suptitle(f"Dominant exchanges, workflow={workflow}")
-    fig.savefig(outdir / "fig9_dominant.png", dpi=220)
-    plt.close(fig)
+    save_fig(fig, outdir, "fig9_dominant.png", dpi)
 
 
-def plot_subdominant(data, outdir: Path, workflow: str, nmaxes: tuple[int, ...], ts: list[float], tmax: float):
+def plot_subdominant(
+    data,
+    outdir: Path,
+    workflow: str,
+    nmaxes: tuple[int, ...],
+    ts: list[float],
+    tmax: float,
+    dpi: int,
+):
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), constrained_layout=True)
     t_dense = np.linspace(0.0, tmax, 300)
     pt_ratio = [ratio(j2_pt(t), j1_pt(t)) for t in t_dense]
@@ -288,15 +349,15 @@ def plot_subdominant(data, outdir: Path, workflow: str, nmaxes: tuple[int, ...],
             ax.plot(ts, vals, "o-", color=COLORS.get(nmax), label=f"N={nmax}")
         ax.plot(t_dense, pt_ratio, color="#f5a000", linewidth=2.5, label="PT")
         setup_axis(ax, ylabel=ylabel, xlim=(0.0, tmax))
+        add_cuprates_bar(ax)
         ax.set_title(title)
         ax.legend(fontsize=8)
 
     fig.suptitle(f"Subdominant two-site exchanges, workflow={workflow}")
-    fig.savefig(outdir / "fig10_subdominant.png", dpi=220)
-    plt.close(fig)
+    save_fig(fig, outdir, "fig10_subdominant.png", dpi)
 
 
-def plot_pt_ratio(data, outdir: Path, workflow: str, nmax: int, ts: list[float], tmax: float):
+def plot_pt_ratio(data, outdir: Path, workflow: str, nmax: int, ts: list[float], tmax: float, dpi: int):
     fig, ax = plt.subplots(figsize=(7.2, 5.0), constrained_layout=True)
     curves = [
         ("J1", "#ff0000", "-", lambda combo, t: ratio(combo["two_site"].get((1, 0)), j1_pt(t))),
@@ -310,11 +371,11 @@ def plot_pt_ratio(data, outdir: Path, workflow: str, nmax: int, ts: list[float],
         ax.plot(ts, vals, marker="o", linestyle=linestyle, color=color, label=label)
     ax.axhline(1.0, color="#777777", linestyle=":", linewidth=1.2)
     setup_axis(ax, ylabel="non-perturbative / PT", xlim=(0.0, tmax))
+    add_cuprates_bar(ax)
     ax.set_ylim(bottom=0.0)
     ax.set_title(f"Comparison with 4th-order PT, workflow={workflow}, N={nmax}")
     ax.legend(fontsize=8)
-    fig.savefig(outdir / "fig11_pt_ratio.png", dpi=220)
-    plt.close(fig)
+    save_fig(fig, outdir, "fig11_pt_ratio.png", dpi)
 
 
 def select_n4_terms(data, nmax: int, t_ref: float) -> list[tuple]:
@@ -332,12 +393,20 @@ def select_n4_terms(data, nmax: int, t_ref: float) -> list[tuple]:
     return ranked[:2]
 
 
-def plot_n4_terms(data, outdir: Path, workflow: str, nmaxes: tuple[int, ...], ts: list[float], tmax: float):
+def plot_n4_terms(
+    data,
+    outdir: Path,
+    workflow: str,
+    nmaxes: tuple[int, ...],
+    ts: list[float],
+    tmax: float,
+    dpi: int,
+) -> list[tuple]:
     ref_nmax = max(nmaxes)
     keys = select_n4_terms(data, ref_nmax, ts[-1])
     if not keys:
         print("warning: no non-plaquette N4 terms found; skipping fig12")
-        return
+        return []
 
     fig, axes = plt.subplots(1, len(keys), figsize=(6.2 * len(keys), 4.8), constrained_layout=True)
     if len(keys) == 1:
@@ -356,18 +425,142 @@ def plot_n4_terms(data, outdir: Path, workflow: str, nmaxes: tuple[int, ...], ts
             ax.plot(ts, vals, "o-", color=COLORS.get(nmax), label=f"N={nmax}")
         ax.axhline(0.0, color="#555555", linewidth=0.9)
         setup_axis(ax, ylabel="J_N4 / J2", xlim=(0.0, tmax))
-        ax.set_title(f"N4 term {idx}")
+        add_cuprates_bar(ax)
+        ax.set_title(f"N4 term {idx}: {key_short_label(key)}", fontsize=11)
         ax.legend(fontsize=8)
 
     fig.suptitle(f"Leading non-plaquette four-site terms, workflow={workflow}")
-    fig.savefig(outdir / "fig12_n4_terms.png", dpi=220)
-    plt.close(fig)
+    save_fig(fig, outdir, "fig12_n4_terms.png", dpi)
 
     details_path = outdir / "fig12_n4_terms_selected.txt"
     lines = ["# selected non-plaquette N4 terms", f"# workflow={workflow} ref_N={ref_nmax} ref_t={ts[-1]:.4f}"]
     for item in details:
         lines.append(f"panel {item['panel']}: {item['key']}")
     details_path.write_text("\n".join(lines) + "\n")
+    return keys
+
+
+def write_csv(path: Path, header: list[str], rows: list[list[float | int | str]]):
+    with path.open("w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(header)
+        writer.writerows(rows)
+
+
+def write_dominant_csv(data, outdir: Path, nmaxes: tuple[int, ...], ts: list[float]):
+    header = ["t_over_U", "Jc_parallel_PT_meV", "Jc_cross_PT_meV", "J1_PT_meV"]
+    for nmax in nmaxes:
+        header.extend([
+            f"N{nmax}_Jc_parallel_meV",
+            f"N{nmax}_Jc_cross_meV",
+            f"N{nmax}_J1_meV",
+        ])
+    rows = []
+    for t in ts:
+        row: list[float | int | str] = [
+            t,
+            jc_parallel_pt(t) * 1000.0,
+            jc_cross_pt(t) * 1000.0,
+            j1_pt(t) * 1000.0,
+        ]
+        for nmax in nmaxes:
+            combo = data.get((nmax, t))
+            if combo is None:
+                row.extend([math.nan, math.nan, math.nan])
+                continue
+            jc = combo["jc"]
+            two_site = combo["two_site"]
+            row.extend([
+                jc[0] * 1000.0 if jc else math.nan,
+                jc[1] * 1000.0 if jc else math.nan,
+                two_site.get((1, 0), math.nan) * 1000.0,
+            ])
+        rows.append(row)
+    write_csv(outdir / "fig9_dominant.csv", header, rows)
+
+
+def write_subdominant_csv(data, outdir: Path, nmaxes: tuple[int, ...], ts: list[float]):
+    header = ["t_over_U", "J2_over_J1_PT", "J3_over_J1_PT"]
+    for nmax in nmaxes:
+        header.extend([f"N{nmax}_J2_over_J1", f"N{nmax}_J3_over_J1"])
+    rows = []
+    for t in ts:
+        row: list[float | int | str] = [
+            t,
+            ratio(j2_pt(t), j1_pt(t)),
+            ratio(j3_pt(t), j1_pt(t)),
+        ]
+        for nmax in nmaxes:
+            combo = data.get((nmax, t))
+            if combo is None:
+                row.extend([math.nan, math.nan])
+                continue
+            two_site = combo["two_site"]
+            j1 = two_site.get((1, 0), 0.0)
+            row.extend([
+                ratio(two_site.get((1, 1)), j1),
+                ratio(two_site.get((2, 0)), j1),
+            ])
+        rows.append(row)
+    write_csv(outdir / "fig10_subdominant.csv", header, rows)
+
+
+def write_pt_ratio_csv(data, outdir: Path, nmax: int, ts: list[float]):
+    header = [
+        "t_over_U",
+        "J1_over_PT",
+        "J2_over_PT",
+        "J3_over_PT",
+        "Jc_cross_over_PT",
+        "Jc_parallel_over_PT",
+    ]
+    rows = []
+    for t in ts:
+        combo = data.get((nmax, t))
+        if combo is None:
+            rows.append([t, math.nan, math.nan, math.nan, math.nan, math.nan])
+            continue
+        two_site = combo["two_site"]
+        jc = combo["jc"]
+        rows.append([
+            t,
+            ratio(two_site.get((1, 0)), j1_pt(t)),
+            ratio(two_site.get((1, 1)), j2_pt(t)),
+            ratio(two_site.get((2, 0)), j3_pt(t)),
+            ratio(jc[1] if jc else None, jc_cross_pt(t)),
+            ratio(jc[0] if jc else None, jc_parallel_pt(t)),
+        ])
+    write_csv(outdir / "fig11_pt_ratio.csv", header, rows)
+
+
+def write_n4_csv(data, outdir: Path, nmaxes: tuple[int, ...], ts: list[float], keys: list[tuple]):
+    header = ["panel", "term", "Nmax", "t_over_U", "J_N4_over_J2"]
+    rows = []
+    for panel, key in enumerate(keys, start=1):
+        label = key_short_label(key)
+        for nmax in nmaxes:
+            for t in ts:
+                combo = data.get((nmax, t))
+                if combo is None:
+                    value = math.nan
+                else:
+                    value = ratio(combo["n4"].get(key), combo["two_site"].get((1, 1), 0.0))
+                rows.append([panel, label, nmax, t, value])
+    write_csv(outdir / "fig12_n4_terms.csv", header, rows)
+
+
+def write_data_tables(
+    data,
+    outdir: Path,
+    nmaxes: tuple[int, ...],
+    ts: list[float],
+    n4_keys: list[tuple],
+):
+    write_dominant_csv(data, outdir, nmaxes, ts)
+    write_subdominant_csv(data, outdir, nmaxes, ts)
+    write_pt_ratio_csv(data, outdir, max(nmaxes), ts)
+    if n4_keys:
+        write_n4_csv(data, outdir, nmaxes, ts, n4_keys)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -376,6 +569,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workflow", default="adiabatic", choices=WORKFLOWS)
     parser.add_argument("--nmax", type=int, nargs="*", default=list(DEFAULT_NMAXES))
     parser.add_argument("--tmax", type=float, default=0.20)
+    parser.add_argument("--dpi", type=int, default=220)
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
@@ -397,10 +591,11 @@ def main(argv: list[str] | None = None) -> int:
     if not data:
         raise SystemExit(f"no embed data found under {root}")
 
-    plot_dominant(data, outdir, args.workflow, nmaxes, ts, args.tmax)
-    plot_subdominant(data, outdir, args.workflow, nmaxes, ts, args.tmax)
-    plot_pt_ratio(data, outdir, args.workflow, max(nmaxes), ts, args.tmax)
-    plot_n4_terms(data, outdir, args.workflow, nmaxes, ts, args.tmax)
+    plot_dominant(data, outdir, args.workflow, nmaxes, ts, args.tmax, args.dpi)
+    plot_subdominant(data, outdir, args.workflow, nmaxes, ts, args.tmax, args.dpi)
+    plot_pt_ratio(data, outdir, args.workflow, max(nmaxes), ts, args.tmax, args.dpi)
+    n4_keys = plot_n4_terms(data, outdir, args.workflow, nmaxes, ts, args.tmax, args.dpi)
+    write_data_tables(data, outdir, nmaxes, ts, n4_keys)
 
     print(f"wrote plots to {outdir}")
     if missing:
