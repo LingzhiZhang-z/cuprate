@@ -327,12 +327,13 @@ def _cluster_geometry_payload(cluster: Any) -> dict[str, Any]:
 
 def _projection_blocks(model: Any) -> list[dict[str, Any]]:
     blocks = []
-    for block, selected, t11_norm, info in zip(
+    per_block_fit = getattr(model, "fit_metrics_per_block", None) or []
+    for idx, (block, selected, t11_norm, info) in enumerate(zip(
         model.blocks,
         model.selected_indices,
         model.t11m1_norms,
         model.selection_info,
-    ):
+    )):
         overlap = _info_overlap(info)
         payload = {
             "block": block.label(),
@@ -347,6 +348,9 @@ def _projection_blocks(model: Any) -> list[dict[str, Any]]:
             "overlap": None if overlap is None else float(overlap),
             "selection_info": _json_ready(info),
         }
+        if idx < len(per_block_fit):
+            payload["residual"] = float(per_block_fit[idx]["residual"])
+            payload["relative_error"] = float(per_block_fit[idx]["relative_error"])
         if "adiabatic_seed" in info:
             payload["adiabatic_seed"] = _json_ready(info["adiabatic_seed"])
         blocks.append(payload)

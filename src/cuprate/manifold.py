@@ -96,18 +96,31 @@ class Block:
         ham = data["ham"] if "ham" in data.files else None
         basis_transform = data["basis_transform"] if "basis_transform" in data.files else None
 
-        tokens = Path(f"{base}_label.txt").read_text().split()
-        N = int(tokens[0])
-        nelec = int(tokens[1])
-        twoSz = None if tokens[2] == "all" else int(tokens[2])
-        twoS = None if tokens[3] == "all" else int(tokens[3])
-        eta = None if tokens[4] == "all" else int(tokens[4])
-        n_states, n_eigvals = int(tokens[5]), int(tokens[6])
-        idx = 7
-        basis_states = [int(x) for x in tokens[idx:idx + n_states]]
-        idx += n_states
+        text = Path(f"{base}_label.txt").read_text()
+        lines = text.splitlines()
+        header_tokens = lines[0].split()
+        # Old header: N nelec twoSz twoS n_states n_eigvals          (6 tokens)
+        # New header: N nelec twoSz twoS eta n_states n_eigvals      (7 tokens)
+        if len(header_tokens) == 6:
+            eta = None
+            n_states = int(header_tokens[4])
+            n_eigvals = int(header_tokens[5])
+        elif len(header_tokens) == 7:
+            eta = None if header_tokens[4] == "all" else int(header_tokens[4])
+            n_states = int(header_tokens[5])
+            n_eigvals = int(header_tokens[6])
+        else:
+            raise ValueError(
+                f"label.txt has {len(header_tokens)} header tokens; expected 6 or 7"
+            )
+        N = int(header_tokens[0])
+        nelec = int(header_tokens[1])
+        twoSz = None if header_tokens[2] == "all" else int(header_tokens[2])
+        twoS = None if header_tokens[3] == "all" else int(header_tokens[3])
+        body = " ".join(lines[1:]).split()
+        basis_states = [int(x) for x in body[:n_states]]
         eigvals = (
-            np.array([float(x) for x in tokens[idx:idx + n_eigvals]])
+            np.array([float(x) for x in body[n_states:n_states + n_eigvals]])
             if n_eigvals > 0 else None
         )
 

@@ -46,6 +46,7 @@ class HubbardModel:
         self.bond_groups: list[list[Sequence[int]]] | None = None
         self.coupling_coeffs: list | None = None
         self.fit_metrics: tuple[float, float, float] | None = None
+        self.fit_metrics_per_block: list[dict[str, float]] | None = None
 
     def build_fock_basis(self, twoSz: int | None = None) -> list[int]:
         return generate_states(self.N, self.nelec, twoSz=twoSz)
@@ -480,7 +481,8 @@ class HubbardModel:
 
         bonds = [bond for group in bond_groups for bond in group]
         A = np.vstack([block._spin_operators(bonds) for block in self.blocks])
-        b = np.concatenate([heff.flatten() for heff in self.heff])
+        b_blocks = [heff.flatten() for heff in self.heff]
+        b = np.concatenate(b_blocks)
         x = np.linalg.lstsq(A, b, rcond=None)[0]
 
         residual_vector = A @ x - b
@@ -493,6 +495,19 @@ class HubbardModel:
         ss_tot = float(np.real(np.vdot(centered, centered)))
         r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
+        per_block_metrics: list[dict[str, float]] = []
+        offset = 0
+        for block_b in b_blocks:
+            n = block_b.size
+            res_i = residual_vector[offset:offset + n]
+            res_i_norm = float(np.linalg.norm(res_i))
+            b_i_norm = float(np.linalg.norm(block_b))
+            per_block_metrics.append({
+                "residual": res_i_norm,
+                "relative_error": res_i_norm / b_i_norm if b_i_norm > 0 else 0.0,
+            })
+            offset += n
+
         coeffs: list = [x[0]]
         offset = 1
         for group in bond_groups:
@@ -502,4 +517,5 @@ class HubbardModel:
         self.bond_groups = bond_groups
         self.coupling_coeffs = coeffs
         self.fit_metrics = (rel_err, residual, r2)
+        self.fit_metrics_per_block = per_block_metrics
         return self
