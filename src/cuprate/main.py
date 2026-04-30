@@ -18,6 +18,7 @@ MAIN_KEYS = {
     "seed_results": "SEED_RESULTS",
     "merge": "MERGE",
     "merge_basis": "MERGE_BASIS",
+    "eigh": "EIGH",
 }
 
 
@@ -40,6 +41,9 @@ def parse_args(argv: list[str]) -> WorkchainParams:
     cache_mode = raw.get("CACHE_MODE", "save").lower()
     if cache_mode not in {"none", "load", "save", "partial"}:
         raise ValueError(f"unsupported CACHE_MODE={cache_mode!r}")
+    eigh = raw.get("EIGH", "lowmem").lower()
+    if eigh not in {"lowmem", "fast"}:
+        raise ValueError(f"unsupported EIGH={eigh!r}")
 
     ratio = parse_optional_int(raw, "RATIO")
     n_trials = parse_optional_int(raw, "N_TRIALS")
@@ -89,6 +93,7 @@ def parse_args(argv: list[str]) -> WorkchainParams:
         seed_results=seed_results,
         merge=merge,
         merge_basis=merge_basis,
+        eigh=eigh,
     )
 
 

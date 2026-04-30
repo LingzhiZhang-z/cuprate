@@ -206,11 +206,19 @@ Validation:
 ## 11) Diagonalisation (MUST)
 
 MUST:
-- The Hamiltonian is diagonalised with `numpy.linalg.eigh` (assumes Hermitian).
+- The Hamiltonian is diagonalised with `scipy.linalg.eigh` (assumes Hermitian).
+- `EIGH=lowmem` uses LAPACK driver `ev`.
+- `EIGH=fast` uses LAPACK driver `evd`.
+- The matrix passed to `eigh` is Fortran-contiguous and may be overwritten.
 
 Code form:
 ```python
-eigvals, eigvecs = np.linalg.eigh(H)
+eigvals, eigvecs = scipy.linalg.eigh(
+    H,
+    driver="ev",
+    overwrite_a=True,
+    check_finite=False,
+)
 ```
 
 Validation:

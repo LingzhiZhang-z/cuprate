@@ -67,7 +67,7 @@
 - `states.py`:
   Hubbard basis encoding, ordering, state-space `Sz`/`S2` operators, and the single-state hopping primitive `apply_hop`; pure-spin rows are identified with `pure_spin_state_indices(...)`.
 - `hubbard.py`:
-  the `HubbardModel` single-cluster coordinator; owns the Hubbard Hamiltonian matrix-element methods (`_build_hamiltonian_t`, `_build_hamiltonian_U`, composed as `build_hamiltonian`) and wires basis generation, symmetry blocking, and per-block diagonalisation (`np.linalg.eigh`).
+  the `HubbardModel` single-cluster coordinator; owns the Hubbard Hamiltonian matrix-element methods (`_build_hamiltonian_t`, `_build_hamiltonian_U`, composed as `build_hamiltonian`) and wires basis generation, symmetry blocking, and per-block diagonalisation (`scipy.linalg.eigh`).
 - `sectors.py`:
   `Sz` grouping, highest-weight `S2` multiplets, and `Sz -> (Sz,S)` transforms.
 - `manifold.py`:

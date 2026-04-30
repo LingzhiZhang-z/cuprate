@@ -57,7 +57,8 @@ model.merge_to_sz("block")  # merge twoS sectors in merged block coordinates
 
 MUST:
 - The solve cache stores only solved blocks: basis states, eigenvalues,
-  eigenvectors, Hamiltonian, and optional `basis_transform`.
+  eigenvectors, and optional `basis_transform`; it does not store the
+  Hamiltonian.
 - The solve cache does not store selected indices, `H_eff`, `T11`, or fit
   results.
 - `HubbardModel.solve()` supports exactly four cache modes:
@@ -71,7 +72,10 @@ MUST:
 
 - `cache_dir` is required for `load`, `save`, and `partial`, and forbidden for
   `none`.
+- `EIGH=lowmem|fast` selects the dense diagonalisation driver for newly solved
+  blocks. It has no effect for blocks loaded from cache.
 - Runtime/workchain callers default `CACHE_MODE` to `save`.
+- Runtime/workchain callers default `EIGH` to `lowmem`.
 - `HubbardModel.save(cache_dir)` and `Block.save(cache)` must write the same
   solved block format.
 

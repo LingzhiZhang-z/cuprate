@@ -53,8 +53,8 @@ model.merge_to_sz("block")  # 在 merged block 坐标中合并 twoS 扇区
 ## 3) 本征系统 Cache (MUST)
 
 MUST:
-- solve cache 只存储已求解的 blocks：basis states、本征值、本征向量、
-  Hamiltonian，以及可选 `basis_transform`。
+- solve cache 只存储已求解的 blocks：basis states、本征值、本征向量，
+  以及可选 `basis_transform`；不存储 Hamiltonian。
 - solve cache 不存储 selected indices、`H_eff`、`T11` 或 fit 结果。
 - `HubbardModel.solve()` 精确支持四种 cache mode：
 
@@ -66,14 +66,17 @@ MUST:
 | `partial` | 加载已有 block，并求解/保存缺失 block |
 
 - `load`、`save` 和 `partial` 需要 `cache_dir`；`none` 禁止传入 `cache_dir`。
+- `EIGH=lowmem|fast` 为新求解的 blocks 选择 dense diagonalisation driver；
+  对从 cache 读取的 blocks 无影响。
 - runtime/workchain 调用方默认 `CACHE_MODE` 为 `save`。
+- runtime/workchain 调用方默认 `EIGH` 为 `lowmem`。
 - `HubbardModel.save(cache_dir)` 和 `Block.save(cache)` 必须写出同一种已求解 block 格式。
 
 Code form:
 ```python
 cache = Path(cache_dir) / cluster.label()
 block.save(cache)
-block = Block.load(cache, twoSz, twoS)
+block = Block.load(cache, twoSz, twoS, eta)
 ```
 
 - 运行时路径构造集中在 `cuprate.paths`。

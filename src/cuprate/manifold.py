@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 import numpy as np
+import scipy.linalg
 
 from cuprate import ATOL
 from cuprate.paths import block_token
@@ -64,8 +65,6 @@ class Block:
         arrays: dict[str, np.ndarray] = {}
         if self.eigvecs is not None:
             arrays["eigvecs"] = np.asarray(self.eigvecs)
-        if self.ham is not None:
-            arrays["ham"] = np.asarray(self.ham)
         if self.basis_transform is not None:
             arrays["basis_transform"] = np.asarray(self.basis_transform)
         np.savez_compressed(f"{base}_data.npz", **arrays)
@@ -105,7 +104,6 @@ class Block:
         try:
             with np.load(f"{base}_data.npz") as data:
                 eigvecs = data["eigvecs"] if "eigvecs" in data.files else None
-                ham = data["ham"] if "ham" in data.files else None
                 basis_transform = data["basis_transform"] if "basis_transform" in data.files else None
 
             text = Path(f"{base}_label.txt").read_text()
@@ -139,7 +137,6 @@ class Block:
             raise ValueError(corrupted) from None
 
         if loaded_label != requested_label or not _loaded_eigensystem_is_valid(
-            ham=ham,
             eigvals=eigvals,
             eigvecs=eigvecs,
             basis_transform=basis_transform,
@@ -152,7 +149,7 @@ class Block:
             N=N,
             nelec=nelec,
             basis_states=basis_states,
-            ham=ham,
+            ham=None,
             eigvals=eigvals,
             eigvecs=eigvecs,
             twoSz=loaded_twoSz,
@@ -198,16 +195,25 @@ class Block:
         else:
             self.ham = self.basis_transform.conj().T @ ham @ self.basis_transform
 
-    def solve(self) -> None:
+    def solve(self, *, eigh: str = "lowmem") -> None:
         if self.ham is None:
             raise RuntimeError("Block.solve(): ham is None; call build_hamiltonians() on the model first")
+        # ev is the low-workspace path; evd is faster but needs larger workspace.
+        driver = "evd" if eigh == "fast" else "ev"
+        ham = np.asfortranarray(self.ham)
         try:
-            eigvals, eigvecs = np.linalg.eigh(self.ham)
+            eigvals, eigvecs = scipy.linalg.eigh(
+                ham,
+                driver=driver,
+                overwrite_a=True,
+                check_finite=False,
+            )
         except np.linalg.LinAlgError as exc:
             raise RuntimeError(
                 f"Diagonalization failed for {self._error_context()} "
-                f"ham_shape={self.ham.shape}"
+                f"ham_shape={ham.shape} eigh={eigh}"
             ) from exc
+        self.ham = None
         self.eigvals = eigvals
         self.eigvecs = eigvecs
 
@@ -649,7 +655,6 @@ class Block:
 
 def _loaded_eigensystem_is_valid(
     *,
-    ham: np.ndarray | None,
     eigvals: np.ndarray | None,
     eigvecs: np.ndarray | None,
     basis_transform: np.ndarray | None,
@@ -657,25 +662,25 @@ def _loaded_eigensystem_is_valid(
     n_eigvals: int,
 ) -> bool:
     try:
-        if ham is None or eigvecs is None or eigvals is None:
+        if eigvecs is None or eigvals is None:
             return False
-        if ham.ndim != 2 or ham.shape[0] != ham.shape[1]:
+        if eigvecs.ndim != 2 or eigvecs.shape[0] != eigvecs.shape[1]:
             return False
-        n = ham.shape[0]
+        n = eigvecs.shape[0]
         if eigvecs.shape != (n, n) or eigvals.shape != (n,) or n_eigvals != n:
             return False
         if basis_transform is not None and basis_transform.shape != (n_states, n):
             return False
-        for array in (ham, eigvecs, eigvals, basis_transform):
+        for array in (eigvecs, eigvals, basis_transform):
             if array is not None and not np.all(np.isfinite(array)):
                 return False
 
-        residual = np.matmul(ham, eigvecs)
-        for col, eigval in enumerate(eigvals):
-            residual[:, col] -= eigval * eigvecs[:, col]
-        residual_norm = float(np.linalg.norm(residual))
-        scale = max(1.0, float(np.linalg.norm(ham)), float(np.linalg.norm(eigvals)))
-        return residual_norm / scale <= ATOL["loose"]
+        gram = eigvecs.conj().T @ eigvecs
+        identity = np.eye(n, dtype=gram.dtype)
+        ortho_scale = max(1.0, float(n))
+        if float(np.linalg.norm(gram - identity)) / ortho_scale > ATOL["loose"]:
+            return False
+        return True
     except (TypeError, ValueError, FloatingPointError):
         return False
 

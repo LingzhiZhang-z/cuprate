@@ -207,11 +207,19 @@ Validation:
 ## 11) 对角化 (MUST)
 
 MUST:
-- 用 `numpy.linalg.eigh` 对角化哈密顿量（假设厄米）。
+- 用 `scipy.linalg.eigh` 对角化哈密顿量（假设厄米）。
+- `EIGH=lowmem` 使用 LAPACK driver `ev`。
+- `EIGH=fast` 使用 LAPACK driver `evd`。
+- 传给 `eigh` 的矩阵是 Fortran-contiguous，并允许被覆盖。
 
 Code form:
 ```python
-eigvals, eigvecs = np.linalg.eigh(H)
+eigvals, eigvecs = scipy.linalg.eigh(
+    H,
+    driver="ev",
+    overwrite_a=True,
+    check_finite=False,
+)
 ```
 
 Validation:

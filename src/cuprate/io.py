@@ -390,6 +390,7 @@ def _run_params_json(
             main_data_dir(params.root, params.N, params.N, params.U, params.t, params.mode)
         ),
         "CACHE_MODE": params.cache_mode,
+        "EIGH": params.eigh,
     }
     if params.ratio is not None:
         payload["RATIO"] = int(params.ratio)

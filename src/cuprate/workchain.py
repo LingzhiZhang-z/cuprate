@@ -78,6 +78,7 @@ class WorkchainParams:
     seed_results: Path | None = None
     merge: str = "none"
     merge_basis: str | None = None
+    eigh: str = "lowmem"
 
 
 def run_workchain(params: WorkchainParams) -> dict[str, Any] | None:
@@ -198,7 +199,7 @@ def _process_family(
             if params.cache_mode != "none"
             else None
         )
-        model.solve(cache_mode=params.cache_mode, cache_dir=cache_dir)
+        model.solve(cache_mode=params.cache_mode, cache_dir=cache_dir, eigh=params.eigh)
         if params.merge == "Sz":
             model.merge_to_sz(params.merge_basis or "fock")
         # Cache save/load is complete; projection and fit do not need ham.

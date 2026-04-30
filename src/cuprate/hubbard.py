@@ -270,6 +270,7 @@ class HubbardModel:
         *,
         cache_mode: str = "none",
         cache_dir: str | Path | None = None,
+        eigh: str = "lowmem",
     ) -> "HubbardModel":
         """Solve sectors using cache_mode: none, load, save, or partial."""
         if not getattr(self, "blocks", None):
@@ -291,7 +292,7 @@ class HubbardModel:
                 else:
                     if block.ham is None:
                         raise RuntimeError("call build_hamiltonians() first")
-                    block.solve()
+                    block.solve(eigh=eigh)
                     block.save(cache)
             return self
 
@@ -299,7 +300,7 @@ class HubbardModel:
         for block in self.blocks:
             if block.ham is None:
                 raise RuntimeError("call build_hamiltonians() first")
-            block.solve()
+            block.solve(eigh=eigh)
             if cache is not None:
                 block.save(cache)
         return self
