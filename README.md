@@ -56,23 +56,78 @@ Run the main stage with MPI:
 mpirun -n 4 env PYTHONPATH=src python -m cuprate.main N=4 U=1 T=0.02
 ```
 
-Common CLI parameters:
+## CLI Reference
 
-```text
-N, U, T        Required physical parameters
-MODE           full | Sz | SzS2 | SzS2eta2; default: full
-twoSz, twoS    Optional fixed-sector selectors; twoS requires MODE=SzS2 or SzS2eta2
-SCOPE          nonnegative | pm; default: nonnegative for all-twoSz Sz/SzS2/SzS2eta2 runs
-workflow       occ | energy | greedy | greedy_multi | adiabatic; default: occ
-ROOT           Output root directory; default: results
-CACHE_MODE     none | load | save | partial; main default: save
-SEED_RESULTS   Previous results.json for workflow=adiabatic
-SEED_SET       LCE/embed text file under ROOT; each row is a main results.json
+All entry points use `KEY=VALUE` arguments. CLI keys are case-insensitive,
+but the canonical spellings below are used in output metadata.
+
+### Shared Parameters
+
+| Key | Applies to | Meaning |
+|-----|------------|---------|
+| `N` | all stages | Cluster size. In `main` it is the solved cluster size; in `lce` and `embed` it is `Nmax`. Required. |
+| `U` | all stages | On-site Hubbard repulsion. Required. |
+| `T` | all stages | Nearest-neighbor hopping amplitude used by the runtime path. Required. |
+| `ROOT` | all stages | Output root directory. Default: `results`. |
+
+### Main Stage Parameters
+
+| Key | Meaning |
+|-----|---------|
+| `MODE` | Diagonalization block layer: `full`, `Sz`, `SzS2`, or `SzS2eta2`. Default: `full`. |
+| `twoSz` | Optional fixed `2S_z` block selector. Must have the same parity as `N`. |
+| `twoS` | Optional fixed `2S` selector. Requires `MODE=SzS2` or `MODE=SzS2eta2` and fixed `twoSz`. |
+| `SCOPE` | Sector range for all-`twoSz` `MODE=Sz`, `MODE=SzS2`, and `MODE=SzS2eta2` runs. `nonnegative` builds `twoSz >= 0`; `pm` builds positive and negative sectors. Default: `nonnegative`. |
+| `workflow` | Eigenstate selection method: `occ`, `energy`, `greedy`, `greedy_multi`, or `adiabatic`. Default: `occ`. |
+| `CACHE_MODE` | Eigensystem cache policy: `none`, `load`, `save`, or `partial`. Default: `save`. |
+| `SEED_RESULTS` | Previous main-stage `results.json`. Required only for `workflow=adiabatic`. |
+| `RATIO` | Optional search-pool multiplier for `workflow=greedy` or `workflow=greedy_multi`. |
+| `N_TRIALS` | Optional trial count for `workflow=greedy_multi`. |
+| `MAX_FAILURES` | Optional early-stop failure limit for `workflow=greedy_multi`. |
+| `MERGE` | Optional pre-projection merge target. Current supported value: `Sz`. Default: `none`. |
+| `MERGE_BASIS` | Merge representation for `MERGE=Sz`: `fock` or `block`. Default when merging: `fock`. Do not set it when `MERGE=none`. |
+
+`MERGE=Sz` is accepted only for fixed-`twoSz` `MODE=SzS2` or
+`MODE=SzS2eta2` runs without fixed `twoS`. It merges all selected `twoS`
+sectors at that fixed `twoSz` before projection:
+
+- `MERGE_BASIS=fock`: stores merged eigenvectors directly in fixed-`twoSz`
+  Fock row coordinates.
+- `MERGE_BASIS=block`: keeps block-coordinate eigenvectors internally and uses
+  a column-concatenated `basis_transform`; projection artifacts still store
+  `eigvecs_fock`.
+
+### LCE and Embed Parameters
+
+`cuprate.lce` and `cuprate.embed` take exactly `N`, `U`, `T`, optional `ROOT`,
+and `SEED_SET`.
+
+`SEED_SET` is a text file under `ROOT`. Each non-comment line is a main-stage
+`results.json` path relative to `ROOT`. For `N=4`, for example, the seed set
+must list the `N=2`, `N=3`, and `N=4` main outputs with matching `U`, `T`, and
+run configuration.
+
+### Common Main-Stage Examples
+
+```bash
+# Full Fock-space ED, default occ selection.
+PYTHONPATH=src python -m cuprate.main N=4 U=1 T=0.04
+
+# Fixed twoSz block.
+PYTHONPATH=src python -m cuprate.main N=4 U=1 T=0.04 MODE=Sz twoSz=0
+
+# All S2 sectors at fixed twoSz, then merge to one fixed-Sz block before projection.
+PYTHONPATH=src python -m cuprate.main N=4 U=1 T=0.04 MODE=SzS2 twoSz=0 MERGE=Sz MERGE_BASIS=fock
+
+# Eta-refined S2 sectors at fixed twoSz, merged in block coordinates.
+PYTHONPATH=src python -m cuprate.main N=4 U=1 T=0.04 MODE=SzS2eta2 twoSz=0 MERGE=Sz MERGE_BASIS=block
+
+# Greedy multi selection with explicit search parameters.
+PYTHONPATH=src python -m cuprate.main N=4 U=1 T=0.04 MODE=SzS2eta2 workflow=greedy_multi RATIO=8 N_TRIALS=40 MAX_FAILURES=4
+
+# Adiabatic selection from a previous completed main result.
+PYTHONPATH=src python -m cuprate.main N=4 U=1 T=0.08 MODE=SzS2eta2 workflow=adiabatic SEED_RESULTS=results/.../results.json
 ```
-
-For all-`twoSz` `MODE=Sz` / `MODE=SzS2` runs, default `SCOPE=nonnegative`
-builds only `twoSz >= 0` sectors. Use `SCOPE=pm` to build both positive and
-negative `twoSz` sectors. Explicit selectors such as `twoSz=-2` are unaffected.
 
 Output directory shape:
 
@@ -82,15 +137,33 @@ ROOT/block_lce/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/seed_<stem>/
 ROOT/block_embed/N_{N}_nelec_{N}_U_{U:.4f}_t_{T:.4f}/seed_<stem>/
 ```
 
-Default all-`twoSz` output paths use `mode_twoSz` / `mode_twoSz_twoS`; `SCOPE=pm`
-uses `mode_twoSz_pm` / `mode_twoSz_pm_twoS`. `MODE=SzS2eta2` adds an `_eta_0`
-suffix (e.g. `mode_twoSz_twoS_eta_0`, `mode_twoSz_pm_twoS_eta_0`) and refines
-each `(twoSz, twoS)` block to the eta-pairing kernel; the solve cache mirrors
-this with `DATA_twoSz_twoS_eta_0`. The solve cache remains shared:
-`DATA_twoSz` / `DATA_twoSz_twoS` are keyed by concrete block labels, so
-`CACHE_MODE=partial` can extend a default cache with missing negative sectors.
+Default all-`twoSz` output paths use `mode_twoSz` / `mode_twoSz_twoS`;
+`SCOPE=pm` uses `mode_twoSz_pm` / `mode_twoSz_pm_twoS`. Fixed selectors add
+the selected value, for example `mode_twoSz_0` or
+`mode_twoSz_0_twoS_2`.
 
-Key outputs:
+`MODE=SzS2eta2` adds an `_eta_0` suffix, for example
+`mode_twoSz_twoS_eta_0`, `mode_twoSz_pm_twoS_eta_0`, or
+`mode_twoSz_0_twoS_eta_0`. It refines each selected `(twoSz, twoS)` block to
+the eta-pairing kernel.
+
+When `MERGE=Sz` is enabled, the merge information is appended to the workflow
+token:
+
+```text
+workflow_occ_merge_Sz_basis_fock
+workflow_occ_merge_Sz_basis_block
+workflow_greedy_multi_merge_Sz_basis_fock
+```
+
+The solve cache mirrors only the diagonalization layer:
+`DATA`, `DATA_twoSz`, `DATA_twoSz_twoS`, or `DATA_twoSz_twoS_eta_0`. It stores
+solved pre-merge blocks. Merged blocks are not written back to the solve cache.
+`CACHE_MODE=partial` can extend an existing cache with missing concrete blocks.
+
+## Output Meaning
+
+### Main Stage
 
 - `block_main/.../results.json`: main manifest.
 - `block_main/.../exchanges/*.json`: fitted spin couplings per
@@ -99,13 +172,74 @@ Key outputs:
   in the same family.
 - `block_main/.../artifacts/*.npz`: projection artifacts, selected indices,
   `H_eff`, and `T11` diagnostics.
+
+`results.json` is a manifest, not the full data payload. Important fields:
+
+- `schema_version`: output schema version.
+- `result_kind`: `spin_couplings` for main-stage results.
+- `complete_family_set`: true for current production main runs.
+- `run_params`: parsed runtime parameters, path tokens, cache mode, and merge
+  metadata.
+- `families`: one entry per computed `(hole, class_idx)` family, with relative
+  paths to its exchange and cluster-geometry JSON files.
+
+Each `exchanges/*.json` file contains the durable fitted physics output for one
+family:
+
+- `projection.method`: the selection workflow used for this family.
+- `projection.artifact`: relative path to the `.npz` projection artifact.
+- `projection.blocks`: block labels, quantum numbers, selected eigenstate
+  indices, spin dimension, `T11` norm, overlap, and per-block fit diagnostics.
+- `operators.constant_term`: fitted constant term.
+- `operators.groups`: spin-coupling terms grouped by arity and geometry. Two
+  site groups are labelled `J1`, `J2`, ...; four-site groups are `K1`, `K2`,
+  ...; six-site groups are `L1`, `L2`, ...
+- `fit`: family-level least-squares fit metrics: relative error, residual,
+  `r_squared`, max `T11` norm, and adiabatic overlap when available.
+- `metadata`: runtime metadata such as MPI rank and family wall time.
+
+Each `clusters/*.json` file maps the representative family output to every
+cluster member in that family. It stores `cluster_idx`, site coordinates, and
+the local site-index mapping. It does not duplicate the fitted couplings.
+
+Each `artifacts/*.npz` file stores projection data that is useful for debugging
+and adiabatic seeding:
+
+- `block_labels`, `twoSz`, `twoS`, `eta`
+- `block_<i>_basis_states`
+- `block_<i>_selected_indices`
+- `block_<i>_Heff`
+- `block_<i>_eigvecs_fock`
+- `t11_minus_1_norm`, `overlap`
+
+For merged runs, `block_<i>_eigvecs_fock` is always in Fock row coordinates,
+even when `MERGE_BASIS=block`.
+
+### LCE Stage
+
 - `block_lce/.../lce_results.json`: LCE manifest.
 - `block_lce/.../weights/N_*/*.json`: net LCE weight for each concrete cluster.
 - `block_lce/.../weights/N_*/*.txt`: human-readable sidecar with the same stem.
+
+`lce_results.json` records the seed set, source main inputs, run parameters,
+and the list of generated weight files. Each weight JSON contains the net
+linked-cluster contribution for one concrete cluster, using the same operator
+schema as main-stage exchange files.
+
+### Embed Stage
+
 - `block_embed/.../two_site.txt`: embedded two-site target couplings.
 - `block_embed/.../clusters/*.txt`: embedded multi-site target couplings.
+- `block_embed/.../embed_results.json`: embed manifest.
+- `block_embed/.../embed_summary.txt`: summary of source LCE inputs and target
+  output counts.
 
-Text files are inspection sidecars only. Downstream stages read JSON/NPZ.
+`embed_results.json` records the source LCE manifest, seed set metadata,
+two-site output file, cluster output files, and embedding diagnostics. The
+plain-text files are the main human-facing embed output.
+
+Text files are inspection sidecars unless explicitly documented as the embed
+target output. LCE and adiabatic seed loading read JSON/NPZ machine outputs.
 
 ## Diagnostics and Plotting
 
