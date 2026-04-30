@@ -636,12 +636,12 @@ class Block:
         spin_fock_rows = self.spin_fock_rows()
         spin_sector_columns = self.spin_sector_columns()
         if self.basis_transform is None:
-            U_spin = np.eye(len(spin_fock_rows), dtype=complex)
+            U_spin = np.eye(len(spin_fock_rows), dtype=np.float64)
         else:
             U_spin = self.basis_transform[np.ix_(spin_fock_rows, spin_sector_columns)]
 
         states = [self.basis_states[i] for i in spin_fock_rows]
-        matrices = [np.eye(len(spin_sector_columns), dtype=complex)]
+        matrices = [np.eye(len(spin_sector_columns), dtype=np.float64)]
         for bond in bonds:
             matrices.append(U_spin.conj().T @ spin_matrix(states, bond) @ U_spin)
         return np.array([matrix.flatten() for matrix in matrices]).T

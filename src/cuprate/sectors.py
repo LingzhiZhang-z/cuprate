@@ -41,7 +41,7 @@ def _null_space(matrix):
     """Orthonormal basis for ker(matrix) via SVD."""
     n = matrix.shape[1]
     if matrix.shape[0] == 0:
-        return np.eye(n, dtype=complex)
+        return np.eye(n, dtype=np.float64)
     try:
         _u, sv, vh = np.linalg.svd(matrix, full_matrices=True)
     except np.linalg.LinAlgError as exc:
@@ -200,7 +200,7 @@ def build_S2_transforms(grouped_states, N, sector_blocks):
     for (twoSz, twoS), blocks in blocks_by_sector.items():
         n_rows = len(basis[twoSz])
         n_cols = sum(coeff_block.shape[1] for _states_block, coeff_block in blocks)
-        U = np.zeros((n_rows, n_cols), dtype=complex)
+        U = np.zeros((n_rows, n_cols), dtype=np.float64)
         col_start = 0
         for states_block, coeff_block in blocks:
             indices = [basis_map[twoSz][state] for state in states_block]
@@ -263,7 +263,7 @@ def build_S2eta0_transforms(grouped_states, N, eta0_sector_blocks):
     for (twoSz, twoS, eta), blocks in blocks_by_sector.items():
         n_rows = len(basis[twoSz])
         n_cols = sum(coeff_block.shape[1] for _states_block, coeff_block in blocks)
-        U = np.zeros((n_rows, n_cols), dtype=complex)
+        U = np.zeros((n_rows, n_cols), dtype=np.float64)
         col_start = 0
         for states_block, coeff_block in blocks:
             indices = [basis_map[twoSz][state] for state in states_block]

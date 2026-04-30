@@ -38,12 +38,12 @@ class HubbardModel:
     ):
         self.cluster = cluster
         self.N = cluster.N
-        self.U = complex(U)
-        self.t = complex(t)
+        self.U = U
+        self.t = t
         self.nelec = self.N if nelec is None else nelec
         self.bonds = [tuple(map(int, bond)) for bond in cluster.bonds]
         self.hoppings = (
-            [complex(h) for h in hoppings] if hoppings else [self.t] * len(self.bonds)
+            list(hoppings) if hoppings else [self.t] * len(self.bonds)
         )
         self.selected_indices: list[list[int]] | None = None
         self.selection_info: list[dict] | None = None
@@ -62,7 +62,7 @@ class HubbardModel:
         states = list(basis_states)
         state_to_idx = {state: idx for idx, state in enumerate(states)}
         dim = len(states)
-        H_t = np.zeros((dim, dim), dtype=complex)
+        H_t = np.zeros((dim, dim), dtype=np.float64)
         for col, state in enumerate(states):
             for (site_i, site_j), hopping in zip(self.bonds, self.hoppings):
                 for spin in ("up", "down"):
@@ -82,7 +82,7 @@ class HubbardModel:
     def _build_hamiltonian_U(self, basis_states: Sequence[int]) -> np.ndarray:
         """Build the diagonal interaction matrix H_U on `basis_states`."""
         diag = [self.U * count_double_occ(state, self.N) for state in basis_states]
-        return np.diag(np.asarray(diag, dtype=complex))
+        return np.diag(np.asarray(diag, dtype=np.float64))
 
     def build_hamiltonian(self, basis_states: Sequence[int]) -> np.ndarray:
         """Build the full Hubbard Hamiltonian matrix on `basis_states`."""

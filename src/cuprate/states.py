@@ -106,7 +106,7 @@ def _calc_site_S_minus_state(state: int, i: int) -> int | None:
 
 def _calc_spin_ladder_matrix(states_src: list[int], states_dst: list[int], N: int, lowering: bool) -> np.ndarray:
     state_to_row = {state: idx for idx, state in enumerate(states_dst)}
-    matrix = np.zeros((len(states_dst), len(states_src)), dtype=complex)
+    matrix = np.zeros((len(states_dst), len(states_src)), dtype=np.float64)
     for col, state in enumerate(states_src):
         for i in range(N):
             moved_state = (
@@ -143,7 +143,7 @@ def calc_eta2_matrix_direct(states: list[int], N: int, signs) -> np.ndarray:
         raise ValueError(f"eta signs length {len(signs)} does not match N={N}")
 
     state_to_row = {state: row for row, state in enumerate(states)}
-    matrix = np.zeros((len(states), len(states)), dtype=complex)
+    matrix = np.zeros((len(states), len(states)), dtype=np.float64)
 
     for col, state in enumerate(states):
         empty_sites = []
@@ -175,7 +175,7 @@ def calc_eta_plus_matrix(states_src: list[int], states_dst: list[int], N: int, s
         raise ValueError(f"eta signs length {len(signs)} does not match N={N}")
 
     state_to_row = {state: row for row, state in enumerate(states_dst)}
-    matrix = np.zeros((len(states_dst), len(states_src)), dtype=complex)
+    matrix = np.zeros((len(states_dst), len(states_src)), dtype=np.float64)
     for col, state in enumerate(states_src):
         for site in range(N):
             if site_code(state, site) != 0:
@@ -233,7 +233,7 @@ def calc_fourS2_element(state1: int, state2: int, N: int) -> int:
 
 def calc_fourS2_matrix(states: list[int], N: int) -> np.ndarray:
     dim = len(states)
-    fourS2_matrix = np.zeros([dim, dim], dtype=complex)
+    fourS2_matrix = np.zeros([dim, dim], dtype=np.float64)
     for i in range(dim):
         fourS2_matrix[i][i] = calc_fourS2_element(states[i], states[i], N)
         for j in range(i + 1, dim):
@@ -250,7 +250,7 @@ def _spin_pair(states: list[int], i: int, j: int) -> np.ndarray:
     """S_i · S_j on the singly occupied (D=0) Fock basis `states`."""
     dim = len(states)
     index = {state: idx for idx, state in enumerate(states)}
-    matrix = np.zeros((dim, dim), dtype=complex)
+    matrix = np.zeros((dim, dim), dtype=np.float64)
 
     for idx, state in enumerate(states):
         code_i = site_code(state, i)
