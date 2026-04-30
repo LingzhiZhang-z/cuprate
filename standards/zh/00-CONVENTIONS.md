@@ -57,13 +57,19 @@ MUST:
 - `S2`（$= S(S+1)$）是计算得到的浮点数，不是整数标签。
 - 规范的运行时工作流参数名为 `workflow`；规范的 all-`twoSz`
   扇区范围参数名为 `SCOPE`。
+- 规范的运行时合并参数名为 `MERGE` 和 `MERGE_BASIS`。
 - 标准和实现中不得引入替代规范名称，如
   `ssq`、`s_squared`、`sz` 或 `s`。
-- 唯一允许的 CLI `MODE` 拼写为 `full`、`Sz` 和 `SzS2`。
+- 唯一允许的 CLI `MODE` 拼写为 `full`、`Sz`、`SzS2` 和
+  `SzS2eta2`。
 - `MODE` 只选择对角化分块层级；可选 CLI 参数 `twoSz` 和 `twoS`
   在该层级内选择具体 block 子集。
-- `SCOPE` 只为 all-`twoSz` 的 `MODE=Sz` 和 `MODE=SzS2` 运行选择扇区范围。
-  合法值为 `nonnegative` 和 `pm`。
+- `SCOPE` 只为 all-`twoSz` 的 `MODE=Sz`、`MODE=SzS2` 和
+  `MODE=SzS2eta2` 运行选择扇区范围。合法值为 `nonnegative` 和 `pm`。
+- `eta` 是规范的 eta-pseudospin 整数标签。第一版 `MODE=SzS2eta2`
+  运行只保留 `eta=0` 块；没有公开的 `eta` CLI selector。
+- `MERGE=Sz` 在投影前将已求解的固定 `(twoSz,twoS[,eta])` 扇区合并回
+  固定 `twoSz` 块。合法 `MERGE_BASIS` 值为 `fock` 和 `block`。
 - 规范的运行时路径标记为：
   - `N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>`
   - `twoSz_<value>`（负值使用 `n` 前缀：`twoSz_n1` 表示 $-1$）
@@ -76,6 +82,15 @@ MUST:
   - `mode_twoSz_pm_twoS`
   - `mode_twoSz_<value>_twoS`
   - `mode_twoSz_<value>_twoS_<value>`
+  - `mode_twoSz_twoS_eta_0`
+  - `mode_twoSz_pm_twoS_eta_0`
+  - `mode_twoSz_<value>_twoS_eta_0`
+  - `mode_twoSz_<value>_twoS_<value>_eta_0`
+  - `merge_Sz_basis_fock`
+  - `merge_Sz_basis_block`
+  - `workflow_<workflow>_merge_Sz_basis_<basis>`
+  - `eta_<value>`：在 block label 中跟在 `twoS_<value>` 后
+  - `eta_0`：在 merged block label 中没有 `twoS` 时跟在 `twoSz_<value>` 后
   - `seed_<stem>`：由 `SEED_SET` 文本文件选择的 LCE/embed 输出
 - 路径里的 `mode_*` token 是输出目录名，不是 CLI `MODE` 输入值。
 - 路径里的 `seed_*` token 来自 `SEED_SET` 文件 stem。它们是输出目录名，
@@ -87,12 +102,13 @@ MUST:
 
 Code form:
 ```text
-canonical physics names: twoSz, twoS, S2
+canonical physics names: twoSz, twoS, S2, eta, eta2
 canonical workflow key: workflow
 canonical LCE/embed input key: SEED_SET
 canonical all-twoSz scope key: SCOPE
-canonical CLI modes: full, Sz, SzS2
-canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*, seed_*
+canonical merge keys: MERGE, MERGE_BASIS
+canonical CLI modes: full, Sz, SzS2, SzS2eta2
+canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*, merge_*, workflow_*, seed_*
 negative value encoding: n prefix (e.g. twoSz_n1 = twoSz = -1)
 ```
 

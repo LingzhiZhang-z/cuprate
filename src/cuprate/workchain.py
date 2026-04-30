@@ -76,6 +76,8 @@ class WorkchainParams:
     n_trials: int | None = None
     max_failures: int | None = None
     seed_results: Path | None = None
+    merge: str = "none"
+    merge_basis: str | None = None
 
 
 def run_workchain(params: WorkchainParams) -> dict[str, Any] | None:
@@ -99,6 +101,8 @@ def run_workchain(params: WorkchainParams) -> dict[str, Any] | None:
         twoSz=params.twoSz,
         twoS=params.twoS,
         scope=params.scope,
+        merge=params.merge,
+        merge_basis=params.merge_basis,
     )
     exchanges_dir = output_dir / "exchanges"
     clusters_dir = output_dir / "clusters"
@@ -161,6 +165,18 @@ def _enumerate_families(N: int) -> list[tuple[tuple[int, int], list[Cluster]]]:
     return [(key, by_family[key]) for key in sorted(by_family)]
 
 
+def _family_error_context(params: WorkchainParams, representative: Cluster) -> str:
+    return (
+        f"family hole={int(representative.hole)} "
+        f"class={int(representative.class_idx)} "
+        f"representative={representative.label()} "
+        f"cluster_idx={int(representative.cluster_idx)} "
+        f"rank={rank} N={params.N} mode={params.mode} "
+        f"workflow={params.workflow} cache_mode={params.cache_mode} "
+        f"merge={params.merge} merge_basis={params.merge_basis}"
+    )
+
+
 def _process_family(
     params: WorkchainParams,
     family: tuple[tuple[int, int], list[Cluster]],
@@ -173,42 +189,56 @@ def _process_family(
     representative = members[0]
     family_start = time.perf_counter()
 
-    model = HubbardModel(representative, params.U, params.t)
-    model.set_symmetry(params.mode, twoSz=params.twoSz, twoS=params.twoS, scope=params.scope)
-    model.build_hamiltonians()
-    cache_dir = (
-        main_data_dir(params.root, params.N, params.N, params.U, params.t, params.mode)
-        if params.cache_mode != "none"
-        else None
-    )
-    model.solve(cache_mode=params.cache_mode, cache_dir=cache_dir)
+    try:
+        model = HubbardModel(representative, params.U, params.t)
+        model.set_symmetry(params.mode, twoSz=params.twoSz, twoS=params.twoS, scope=params.scope)
+        model.build_hamiltonians()
+        cache_dir = (
+            main_data_dir(params.root, params.N, params.N, params.U, params.t, params.mode)
+            if params.cache_mode != "none"
+            else None
+        )
+        model.solve(cache_mode=params.cache_mode, cache_dir=cache_dir)
+        if params.merge == "Sz":
+            model.merge_to_sz(params.merge_basis or "fock")
+        # Cache save/load is complete; projection and fit do not need ham.
+        for block in model.blocks:
+            block.ham = None
 
-    select_kwargs = _selection_kwargs(params, artifacts_dir, hole, class_idx, model, seed_context)
-    model.project(method=params.workflow, **select_kwargs)
+        select_kwargs = _selection_kwargs(params, artifacts_dir, hole, class_idx, model, seed_context)
+        model.project(method=params.workflow, **select_kwargs)
 
-    artifact_name = family_projection_file(hole, class_idx)
-    artifact_path = artifacts_dir / artifact_name
-    write_projection_npz(artifact_path, model)
-    artifact_relpath = str(Path("artifacts") / artifact_name)
+        artifact_name = family_projection_file(hole, class_idx)
+        artifact_path = artifacts_dir / artifact_name
+        write_projection_npz(artifact_path, model)
+        # The artifact has captured eigvecs_fock; fit/output only need Heff and spin bases.
+        for block in model.blocks:
+            block.eigvals = None
+            block.eigvecs = None
+        artifact_relpath = str(Path("artifacts") / artifact_name)
 
-    bond_groups = _fit_bond_groups(representative)
-    model.fit(bond_groups=bond_groups)
-    constant, terms = terms_from_fit(model.bond_groups, model.coupling_coeffs)
-    elapsed = time.perf_counter() - family_start
+        bond_groups = _fit_bond_groups(representative)
+        model.fit(bond_groups=bond_groups)
+        constant, terms = terms_from_fit(model.bond_groups, model.coupling_coeffs)
+        elapsed = time.perf_counter() - family_start
 
-    return write_family_outputs(
-        exchanges_dir=exchanges_dir,
-        clusters_dir=clusters_dir,
-        params=params,
-        representative=representative,
-        members=members,
-        model=model,
-        artifact=artifact_relpath,
-        constant=constant,
-        terms=terms,
-        elapsed=elapsed,
-        rank=rank,
-    )
+        return write_family_outputs(
+            exchanges_dir=exchanges_dir,
+            clusters_dir=clusters_dir,
+            params=params,
+            representative=representative,
+            members=members,
+            model=model,
+            artifact=artifact_relpath,
+            constant=constant,
+            terms=terms,
+            elapsed=elapsed,
+            rank=rank,
+        )
+    except RuntimeError as exc:
+        raise RuntimeError(f"{exc} [{_family_error_context(params, representative)}]") from exc
+    except ValueError as exc:
+        raise ValueError(f"{exc} [{_family_error_context(params, representative)}]") from exc
 
 
 def _selection_kwargs(
@@ -281,6 +311,14 @@ def _load_adiabatic_seed_context(params: WorkchainParams) -> dict[str, Any] | No
     seed_workflow = run_params.get("workflow")
     if seed_workflow not in SUPPORTED_WORKFLOWS:
         raise ValueError(f"SEED_RESULTS has unsupported workflow={seed_workflow!r}")
+    seed_merge = run_params.get("MERGE", "none")
+    seed_merge_basis = run_params.get("MERGE_BASIS")
+    if seed_merge != params.merge or seed_merge_basis != params.merge_basis:
+        raise ValueError(
+            "SEED_RESULTS merge settings do not match current run: "
+            f"seed MERGE={seed_merge!r} MERGE_BASIS={seed_merge_basis!r}; "
+            f"current MERGE={params.merge!r} MERGE_BASIS={params.merge_basis!r}"
+        )
 
     families = payload.get("families")
     if not isinstance(families, list):
@@ -314,37 +352,34 @@ def _load_adiabatic_seed_map(
     if not artifact_path.is_file():
         raise ValueError(f"seed projection artifact does not exist: {artifact_path}")
 
-    with np.load(artifact_path, allow_pickle=False) as data:
-        seed_map = _seed_map_from_npz(data, artifact, artifact_path)
+    corrupted = (
+        "Adiabatic seed artifact is invalid/corrupted: "
+        f"results={seed_context['results_path']} artifact={artifact_path} "
+        f"hole={hole} class={class_idx}"
+    )
+    try:
+        with np.load(artifact_path, allow_pickle=False) as data:
+            seed_map = _seed_map_from_npz(data, artifact, artifact_path)
 
-    for block in model.blocks:
-        label = block.label()
-        if label not in seed_map:
-            raise ValueError(
-                f"seed projection artifact {artifact_path} is missing block {label}"
-            )
-        seed = seed_map[label]
-        if seed["basis_states"] != list(block.basis_states):
-            raise ValueError(
-                f"seed basis mismatch for block {label} in {artifact_path}"
-            )
-        eigvecs_previous = seed["eigvecs_previous"]
-        if eigvecs_previous.shape[0] != len(block.basis_states):
-            raise ValueError(
-                f"seed eigvec row count mismatch for block {label} in {artifact_path}"
-            )
-        selected_previous = np.asarray(seed["selected_previous"], dtype=int)
-        if selected_previous.size != block.spin_dim:
-            raise ValueError(
-                f"seed selected count mismatch for block {label}: "
-                f"expected {block.spin_dim}, got {selected_previous.size}"
-            )
-        if selected_previous.size and (
-            selected_previous.min() < 0 or selected_previous.max() >= eigvecs_previous.shape[1]
-        ):
-            raise ValueError(
-                f"seed selected indices are out of range for block {label} in {artifact_path}"
-            )
+        for block in model.blocks:
+            label = block.label()
+            if label not in seed_map:
+                raise ValueError
+            seed = seed_map[label]
+            if seed["basis_states"] != list(block.basis_states):
+                raise ValueError
+            eigvecs_previous = seed["eigvecs_previous"]
+            if eigvecs_previous.shape[0] != len(block.basis_states):
+                raise ValueError
+            selected_previous = np.asarray(seed["selected_previous"], dtype=int)
+            if selected_previous.size != block.spin_dim:
+                raise ValueError
+            if selected_previous.size and (
+                selected_previous.min() < 0 or selected_previous.max() >= eigvecs_previous.shape[1]
+            ):
+                raise ValueError
+    except (OSError, KeyError, IndexError, ValueError):
+        raise ValueError(corrupted) from None
     return seed_map
 
 
@@ -362,7 +397,10 @@ def _find_seed_entry(seed_context: dict[str, Any], hole: int, class_idx: int) ->
     exchange_path = Path(seed_context["results_dir"]) / exchange_file
     if not exchange_path.is_file():
         raise ValueError(f"seed exchange file does not exist: {exchange_path}")
-    return json.loads(exchange_path.read_text())
+    try:
+        return json.loads(exchange_path.read_text())
+    except json.JSONDecodeError:
+        raise ValueError(f"seed exchange file is invalid/corrupted: {exchange_path}") from None
 
 
 def _seed_map_from_npz(

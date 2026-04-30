@@ -55,8 +55,8 @@ def block_token(
         if twoS is not None or eta is not None:
             raise ValueError("twoS/eta requires twoSz in block token")
         return "full"
-    if eta is not None and twoS is None:
-        raise ValueError("eta requires twoS in block token")
+    if eta is not None and twoS is None and int(eta) != 0:
+        raise ValueError("eta without twoS is only allowed for merged eta=0 block token")
     label = f"twoSz_{int_token(twoSz)}"
     if twoS is not None:
         label += f"_twoS_{int_token(twoS)}"
@@ -187,8 +187,44 @@ def data_dir_name(mode: str) -> str:
     return DATA_TWOSZ_TWOS
 
 
-def workflow_token(workflow: str) -> str:
-    return f"workflow_{workflow.lower()}"
+def canonical_merge(merge: str | None = None) -> str:
+    value = "none" if merge is None else merge.strip().lower()
+    if value == "none":
+        return "none"
+    if value == "sz":
+        return "Sz"
+    raise ValueError(f"unsupported MERGE={merge!r}")
+
+
+def canonical_merge_basis(merge_basis: str | None = None) -> str:
+    value = "fock" if merge_basis is None else merge_basis.strip().lower()
+    if value not in {"fock", "block"}:
+        raise ValueError(f"unsupported MERGE_BASIS={merge_basis!r}")
+    return value
+
+
+def merge_token(
+    merge: str | None = None,
+    merge_basis: str | None = None,
+) -> str | None:
+    merge = canonical_merge(merge)
+    if merge == "none":
+        if merge_basis is not None:
+            raise ValueError("MERGE_BASIS applies only when MERGE=Sz")
+        return None
+    return f"merge_{merge}_basis_{canonical_merge_basis(merge_basis)}"
+
+
+def workflow_token(
+    workflow: str,
+    merge: str | None = None,
+    merge_basis: str | None = None,
+) -> str:
+    token = f"workflow_{workflow.lower()}"
+    merge_part = merge_token(merge, merge_basis)
+    if merge_part is not None:
+        token += f"_{merge_part}"
+    return token
 
 
 def seed_token(seed_set: str | Path) -> str:
@@ -232,11 +268,13 @@ def workflow_dir(
     twoSz: int | None = None,
     twoS: int | None = None,
     scope: str | None = None,
+    merge: str | None = None,
+    merge_basis: str | None = None,
 ) -> Path:
     return (
         stage_parameter_dir(root, stage, N, nelec, U, t)
         / mode_token(mode, twoSz=twoSz, twoS=twoS, scope=scope)
-        / workflow_token(workflow)
+        / workflow_token(workflow, merge=merge, merge_basis=merge_basis)
     )
 
 

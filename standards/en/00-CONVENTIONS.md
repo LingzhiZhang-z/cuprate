@@ -58,6 +58,7 @@ MUST:
 - `S2` ($= S(S+1)$) is a computed float, not an integer label.
 - The canonical runtime workflow parameter name is `workflow`; the canonical
   all-`twoSz` sector-range parameter name is `SCOPE`.
+- The canonical runtime merge parameters are `MERGE` and `MERGE_BASIS`.
 - Standards and implementation must not introduce alternative canonical names such as
   `ssq`, `s_squared`, `sz`, or `s` for these quantities.
 - The only canonical CLI `MODE` spellings are `full`, `Sz`, `SzS2`, and
@@ -67,6 +68,9 @@ MUST:
 - `SCOPE` chooses the sector range only for all-`twoSz` `MODE=Sz`,
   `MODE=SzS2`, and `MODE=SzS2eta2` runs. Valid values are `nonnegative`
   and `pm`.
+- `MERGE=Sz` merges solved fixed-`(twoSz,twoS[,eta])` sectors back to fixed
+  `twoSz` blocks before projection. Valid `MERGE_BASIS` values are `fock` and
+  `block`.
 - `eta` is the canonical eta-pseudospin integer label. In the first
   `MODE=SzS2eta2` implementation, runtime calculation keeps only `eta=0`
   blocks; there is no public `eta` CLI selector.
@@ -86,7 +90,11 @@ MUST:
   - `mode_twoSz_pm_twoS_eta_0`
   - `mode_twoSz_<value>_twoS_eta_0`
   - `mode_twoSz_<value>_twoS_<value>_eta_0`
+  - `merge_Sz_basis_fock`
+  - `merge_Sz_basis_block`
+  - `workflow_<workflow>_merge_Sz_basis_<basis>`
   - `eta_<value>` in block labels after `twoS_<value>`
+  - `eta_0` in merged block labels after `twoSz_<value>` when `twoS` is absent
   - `seed_<stem>` for LCE/embed outputs selected by a `SEED_SET` text file
 - Path `mode_*` tokens are output directory names, not accepted CLI `MODE`
   values.
@@ -103,8 +111,9 @@ canonical physics names: twoSz, twoS, S2, eta, eta2
 canonical workflow key: workflow
 canonical LCE/embed input key: SEED_SET
 canonical all-twoSz scope key: SCOPE
+canonical merge keys: MERGE, MERGE_BASIS
 canonical CLI modes: full, Sz, SzS2, SzS2eta2
-canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*, seed_*
+canonical path tokens: N_<N>_nelec_<nelec>_U_<U:.4f>_t_<T:.4f>, twoSz_<value>, twoS_<value>, mode_*, merge_*, workflow_*, seed_*
 negative value encoding: n prefix (e.g. twoSz_n1 = twoSz = -1)
 ```
 

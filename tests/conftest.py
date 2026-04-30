@@ -3,36 +3,23 @@
 import pathlib
 import sys
 
-import numpy as np
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from cuprate.clusters import Cluster
 from cuprate.hubbard import HubbardModel
-from cuprate.back.io import Params, resolve_mode_spec
-from cuprate import sectors
 
 
 def make_chain_model(N, U, t, mode="full", twoSz=None, twoS=None, match_spin_sectors=False):
     """Build a HubbardModel for a simple chain of N sites."""
-    params = Params(N=N, U=U, t=t, mode=mode, twoSz=twoSz, twoS=twoS,
-                    match_spin_sectors=match_spin_sectors)
-    mode_spec = resolve_mode_spec(params)
+    if match_spin_sectors:
+        raise NotImplementedError("match_spin_sectors is not part of the current HubbardModel API")
 
-    model = HubbardModel(N, U, t)
-    model.set_mode_spec(mode_spec)
-
-    if match_spin_sectors and mode in ("full", "block_sz_full"):
-        model.enable_match_spin_sectors()
-
-    bonds = [(i, i + 1) for i in range(N - 1)]
-    model.add_hopping_bonds(bonds, t)
-    model.set_states(nsites=N, nelec=N, twoSz_set=mode_spec.twoSz)
-
-    if model.use_S2_blocks:
-        model.load_blocks()
-        sectors.construct_transform_matrix(N, model.sz_sectors, model.S2_sectors)
-
-    model.calc_hamiltonian()
+    sites = tuple((i, 0) for i in range(N))
+    bonds = tuple((i, i + 1) for i in range(N - 1))
+    cluster = Cluster(sites=sites, bonds=bonds)
+    model = HubbardModel(cluster, U, t)
+    model.set_symmetry(mode, twoSz=twoSz, twoS=twoS)
+    model.build_hamiltonians()
     model.solve()
-    return model, mode_spec
+    return model, getattr(model, "_mode_spec", None)

@@ -28,16 +28,18 @@ model = HubbardModel(cluster, U, t)
 model.set_symmetry(mode, twoSz=twoSz, twoS=twoS, scope=scope)
 model.build_hamiltonians()
 model.solve(cache_mode=cache_mode, cache_dir=cache_dir)
+if merge == "Sz":
+    model.merge_to_sz(merge_basis)
 model.project(method=workflow, **select_kwargs)
 model.fit(bond_groups=bond_groups)
 ```
 
-- Optional reconstruction is explicit:
+- Optional merge is explicit:
 
 Code form:
 ```python
-model.merge_by_s2()  # merge twoS sectors inside each twoSz
-model.merge_by_sz()  # merge fixed-twoSz blocks into one full block
+model.merge_to_sz("fock")   # merge twoS sectors into fixed-twoSz Fock rows
+model.merge_to_sz("block")  # merge twoS sectors in merged block coordinates
 ```
 
 - Public canonical CLI modes are `full`, `Sz`, `SzS2`, and `SzS2eta2`.
@@ -47,6 +49,9 @@ model.merge_by_sz()  # merge fixed-twoSz blocks into one full block
   while `SCOPE=pm` builds both positive and negative `twoSz`.
 - `MODE=SzS2eta2` first follows the `MODE=SzS2` block selection rules, then
   refines each selected `(twoSz,twoS)` block to `eta=0`.
+- `MERGE=Sz` is accepted only for fixed-`twoSz` `MODE=SzS2` and
+  `MODE=SzS2eta2` runs without fixed `twoS`. `MERGE_BASIS` is `fock` or
+  `block`.
 
 ## 3) Eigensystem Cache (MUST)
 

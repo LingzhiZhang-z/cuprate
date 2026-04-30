@@ -40,7 +40,7 @@
 - First pass for the single-cluster physics line:
   `hubbard.py` → `states.py` → `sectors.py` → `manifold.py`
 - Read `hubbard.py` first:
-  it is the active single-cluster coordinator. `HubbardModel` owns basis generation, symmetry blocking, Hamiltonian construction, solving, merging, projection, and fitting state. Its lifecycle is `set_symmetry()` → `build_hamiltonians()` → `solve()` → optional `merge_by_s2()` / `merge_by_sz()` → `project()` → `fit()`.
+  it is the active single-cluster coordinator. `HubbardModel` owns basis generation, symmetry blocking, Hamiltonian construction, solving, merging, projection, and fitting state. Its lifecycle is `set_symmetry()` → `build_hamiltonians()` → `solve()` → optional `merge_to_sz()` → `project()` → `fit()`.
 - Runtime mode token logic is centralized in `paths.py`; shared `KEY=VALUE`
   CLI parsing and runtime defaults are in `cli.py`. `hubbard.py` consumes the
   parsed mode spec. `MODE` chooses the block layer, while optional `twoSz` and
@@ -82,16 +82,20 @@
 
 ## Diagonalization modes
 
-| Mode | Blocks before optional merge | Optional reconstruction |
+| Mode | Blocks before optional merge | Optional merge |
 |------|------------------------------|-------------------------|
 | `full` | One full Fock block | N/A |
 | `Sz, twoSz=<value>` | One fixed-`twoSz` block | No |
-| `Sz` | Fixed-`twoSz` blocks with `twoSz >= 0` | No full reconstruction |
-| `Sz, SCOPE=pm` | All fixed-`twoSz` blocks | `merge_by_sz()` |
+| `Sz` | Fixed-`twoSz` blocks with `twoSz >= 0` | No |
+| `Sz, SCOPE=pm` | All fixed-`twoSz` blocks | No |
 | `SzS2, twoSz=<value>, twoS=<value>` | One fixed-`(twoSz,twoS)` block | No |
-| `SzS2, twoSz=<value>` | All `twoS` blocks at one fixed `twoSz` | optional `merge_by_s2()` |
+| `SzS2, twoSz=<value>` | All `twoS` blocks at one fixed `twoSz` | optional `merge_to_sz()` |
 | `SzS2` | Fixed-`(twoSz,twoS)` blocks with `twoSz >= 0` | No full reconstruction |
-| `SzS2, SCOPE=pm` | All fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
+| `SzS2, SCOPE=pm` | All fixed-`(twoSz,twoS)` blocks | No full reconstruction |
+| `SzS2eta2, twoSz=<value>, twoS=<value>` | One fixed-`(twoSz,twoS,eta=0)` block | No |
+| `SzS2eta2, twoSz=<value>` | All `twoS` blocks at one fixed `twoSz`, each refined to `eta=0` | optional `merge_to_sz()` |
+| `SzS2eta2` | Fixed-`(twoSz,twoS,eta=0)` blocks with `twoSz >= 0` | No full reconstruction |
+| `SzS2eta2, SCOPE=pm` | All fixed-`(twoSz,twoS,eta=0)` blocks | No full reconstruction |
 
 ## Do not modify tests without explicit request
 

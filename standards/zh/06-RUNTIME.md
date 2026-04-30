@@ -26,23 +26,29 @@ model = HubbardModel(cluster, U, t)
 model.set_symmetry(mode, twoSz=twoSz, twoS=twoS, scope=scope)
 model.build_hamiltonians()
 model.solve(cache_mode=cache_mode, cache_dir=cache_dir)
+if merge == "Sz":
+    model.merge_to_sz(merge_basis)
 model.project(method=workflow, **select_kwargs)
 model.fit(bond_groups=bond_groups)
 ```
 
-- 可选重构必须显式调用：
+- 可选合并必须显式调用：
 
 Code form:
 ```python
-model.merge_by_s2()  # 合并每个 twoSz 内的 twoS 扇区
-model.merge_by_sz()  # 将 fixed-twoSz 块合并成一个 full 块
+model.merge_to_sz("fock")   # 合并 twoS 扇区到 fixed-twoSz Fock 行
+model.merge_to_sz("block")  # 在 merged block 坐标中合并 twoS 扇区
 ```
 
-- 公共规范 CLI 模式为 `full`、`Sz` 和 `SzS2`。
+- 公共规范 CLI 模式为 `full`、`Sz`、`SzS2` 和 `SzS2eta2`。
 - 固定 `twoSz` 和 `twoS` 数值是独立可选 selector 参数。
-- `SCOPE` 控制 all-`twoSz` 的 `MODE=Sz` 和 `MODE=SzS2` 运行中的扇区范围；
-  默认 `SCOPE=nonnegative` 构造 `twoSz >= 0`，`SCOPE=pm` 构造正负
-  `twoSz`。
+- `SCOPE` 控制 all-`twoSz` 的 `MODE=Sz`、`MODE=SzS2` 和
+  `MODE=SzS2eta2` 运行中的扇区范围；默认 `SCOPE=nonnegative` 构造
+  `twoSz >= 0`，`SCOPE=pm` 构造正负 `twoSz`。
+- `MODE=SzS2eta2` 先遵循 `MODE=SzS2` 的 block 选择规则，再将每个选中的
+  `(twoSz,twoS)` block 细分到 `eta=0`。
+- `MERGE=Sz` 只接受固定 `twoSz`、不固定 `twoS` 的 `MODE=SzS2` 和
+  `MODE=SzS2eta2` 运行。`MERGE_BASIS` 为 `fock` 或 `block`。
 
 ## 3) 本征系统 Cache (MUST)
 

@@ -42,7 +42,10 @@ def _null_space(matrix):
     n = matrix.shape[1]
     if matrix.shape[0] == 0:
         return np.eye(n, dtype=complex)
-    _u, sv, vh = np.linalg.svd(matrix, full_matrices=True)
+    try:
+        _u, sv, vh = np.linalg.svd(matrix, full_matrices=True)
+    except np.linalg.LinAlgError as exc:
+        raise RuntimeError(f"Null-space SVD failed matrix_shape={matrix.shape}") from exc
     if len(sv) == 0:
         return np.eye(n, dtype=matrix.dtype)
     null_idx = list(np.where(sv <= ATOL["loose"])[0])
@@ -85,7 +88,16 @@ def _build_highest_weight(grouped_states, N):
     hw = {}
     for (twoSz, D), src_states in grouped_states.items():
         dst_states = grouped_states.get((twoSz + 2, D), [])
-        hw[(twoSz, D)] = _null_space(calc_S_plus_matrix(src_states, dst_states, N))
+        try:
+            hw[(twoSz, D)] = _null_space(
+                calc_S_plus_matrix(src_states, dst_states, N)
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"{exc} [S2 highest-weight "
+                f"N={N} twoSz={twoSz} D={D} "
+                f"src_dim={len(src_states)} dst_dim={len(dst_states)}]"
+            ) from exc
     return hw
 
 
@@ -210,7 +222,14 @@ def build_S2eta0_sectors(N, sector_blocks, cluster):
         transform = np.asarray(block.transform)
         dst_states = target_grouped.get((block.twoSz, block.D + 1), [])
         eta_plus = calc_eta_plus_matrix(block.basis_states, dst_states, N, signs)
-        kernel = _null_space(eta_plus @ transform)
+        try:
+            kernel = _null_space(eta_plus @ transform)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"{exc} [eta0 sector "
+                f"N={N} twoSz={block.twoSz} twoS={block.twoS} "
+                f"D={block.D} eta=0]"
+            ) from exc
         if kernel.shape[1] == 0:
             continue
         eta0_sector_blocks.append(

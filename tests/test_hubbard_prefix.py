@@ -38,18 +38,18 @@ def test_block_label():
 
 def test_cache_path_has_cluster_layer(tmp_path):
     model = HubbardModel(_two_site_cluster(0), U=4.0, t=1.0)
-    _solve_model(model, "fixed_sz_s2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
-    bucket_dir = tmp_path / model.label() / "hole0_class0_idx0" / "sz_s2_block"
+    _solve_model(model, "SzS2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
+    bucket_dir = tmp_path / "hole0_class0_idx0"
     assert (bucket_dir / "twoSz_0_twoS_0_data.npz").exists()
     assert (bucket_dir / "twoSz_0_twoS_0_label.txt").exists()
 
 
 def test_cache_hit_round_trip(tmp_path):
     model = HubbardModel(_two_site_cluster(0), U=4.0, t=1.0)
-    r1 = _solve_model(model, "fixed_sz_s2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
+    r1 = _solve_model(model, "SzS2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
     r2 = _solve_model(
         HubbardModel(_two_site_cluster(0), U=4.0, t=1.0),
-        "fixed_sz_s2",
+        "SzS2",
         twoSz=0,
         twoS=0,
         cache_mode="load",
@@ -61,11 +61,10 @@ def test_cache_hit_round_trip(tmp_path):
 def test_different_clusters_do_not_collide(tmp_path):
     m1 = HubbardModel(_two_site_cluster(0), U=4.0, t=1.0)
     m2 = HubbardModel(_two_site_cluster(1), U=4.0, t=1.0)
-    _solve_model(m1, "fixed_sz_s2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
-    _solve_model(m2, "fixed_sz_s2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
-    model_dir = tmp_path / m1.label()
-    assert (model_dir / "hole0_class0_idx0" / "sz_s2_block" / "twoSz_0_twoS_0_data.npz").exists()
-    assert (model_dir / "hole0_class1_idx0" / "sz_s2_block" / "twoSz_0_twoS_0_data.npz").exists()
+    _solve_model(m1, "SzS2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
+    _solve_model(m2, "SzS2", twoSz=0, twoS=0, cache_mode="save", cache_dir=tmp_path)
+    assert (tmp_path / "hole0_class0_idx0" / "twoSz_0_twoS_0_data.npz").exists()
+    assert (tmp_path / "hole0_class1_idx0" / "twoSz_0_twoS_0_data.npz").exists()
 
 
 def _solve_model(

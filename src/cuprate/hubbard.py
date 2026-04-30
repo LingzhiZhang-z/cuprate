@@ -10,7 +10,13 @@ from scipy.linalg import block_diag
 
 from cuprate.clusters import Cluster
 from cuprate.manifold import Block
-from cuprate.paths import SCOPE_NONNEGATIVE, SCOPE_PM, ModeSpec, mode_spec
+from cuprate.paths import (
+    SCOPE_NONNEGATIVE,
+    SCOPE_PM,
+    ModeSpec,
+    canonical_merge_basis,
+    mode_spec,
+)
 from cuprate.sectors import (
     build_S2_multiplets,
     build_S2_sectors,
@@ -298,21 +304,33 @@ class HubbardModel:
                 block.save(cache)
         return self
 
-    def merge_by_s2(self) -> "HubbardModel":
-        """Merge S² sectors with the same twoSz via block-diagonal sector matrices."""
+    def merge_to_sz(self, merge_basis: str = "fock") -> "HubbardModel":
+        """Merge fixed-(twoSz,twoS[,eta]) sectors into fixed-twoSz blocks."""
+        merge_basis = canonical_merge_basis(merge_basis)
         if not getattr(self, "blocks", None):
             raise RuntimeError("call set_symmetry() first")
+        spec = getattr(self, "_mode_spec", None)
+        if (
+            spec is None
+            or spec.mode not in {"SzS2", "SzS2eta2"}
+            or spec.twoSz_scope != "one"
+            or spec.twoS_scope != "all"
+        ):
+            raise ValueError(
+                "merge_to_sz requires MODE=SzS2 or MODE=SzS2eta2 "
+                "with fixed twoSz and without fixed twoS"
+            )
 
         by_twoSz: dict[int, list[Block]] = {}
         for sector in self.blocks:
             if sector.eigvals is None or sector.eigvecs is None:
                 raise RuntimeError("call solve() first")
-            if sector.ham is None:
-                raise RuntimeError("merge_by_s2 requires solved sectors with ham set")
             if sector.twoSz is None:
-                raise ValueError("merge_by_s2 requires sectors with twoSz set")
+                raise ValueError("merge_to_sz requires sectors with twoSz set")
             if sector.twoS is None or sector.basis_transform is None:
-                raise ValueError("merge_by_s2 requires S²/eta sectors with twoS and basis_transform set")
+                raise ValueError(
+                    "merge_to_sz requires S²/eta sectors with twoS and basis_transform set"
+                )
             by_twoSz.setdefault(sector.twoSz, []).append(sector)
 
         merged: list[Block] = []
@@ -320,93 +338,51 @@ class HubbardModel:
             sectors = sorted(
                 by_twoSz[twoSz],
                 key=lambda sector: (
-                    -1 if sector.twoS is None else sector.twoS,
+                    sector.twoS,
                     -1 if sector.eta is None else sector.eta,
                 ),
             )
             first = sectors[0]
             if any(sector.basis_states != first.basis_states for sector in sectors):
-                raise ValueError("merge_by_s2 requires matching fixed-twoSz Fock bases")
+                raise ValueError("merge_to_sz requires matching fixed-twoSz Fock bases")
+
+            eta_values = {sector.eta for sector in sectors}
+            if eta_values == {None}:
+                merged_eta = None
+            elif eta_values == {0}:
+                merged_eta = 0
+            else:
+                raise ValueError("merge_to_sz requires either no eta refinement or eta=0 sectors")
 
             U_merged = np.concatenate([sector.basis_transform for sector in sectors], axis=1)
-            if U_merged.shape != (len(first.basis_states), len(first.basis_states)):
-                raise ValueError("merge_by_s2 requires all S²/eta sectors for each fixed twoSz")
-            sym_ham = block_diag(*[sector.ham for sector in sectors])
             sym_eigvecs = block_diag(*[sector.eigvecs for sector in sectors])
-            fock_ham = U_merged @ sym_ham @ U_merged.conj().T
-            fock_eigvecs = U_merged @ sym_eigvecs
+            if U_merged.shape[1] != sym_eigvecs.shape[0]:
+                raise ValueError("merge_to_sz sector transform/eigvec dimensions do not match")
+            if merge_basis == "fock":
+                basis_transform = None
+                eigvecs = U_merged @ sym_eigvecs
+            else:
+                basis_transform = U_merged
+                eigvecs = sym_eigvecs
 
             merged.append(
                 Block(
                     N=self.N,
                     nelec=self.nelec,
                     basis_states=first.basis_states,
-                    ham=fock_ham,
+                    ham=None,
                     eigvals=np.concatenate([sector.eigvals for sector in sectors]),
-                    eigvecs=fock_eigvecs,
+                    eigvecs=eigvecs,
                     twoSz=twoSz,
                     twoS=None,
-                    eta=None,
-                    basis_transform=None,
+                    eta=merged_eta,
+                    basis_transform=basis_transform,
                 )
             )
 
         self.blocks = merged
         self.mode = "Sz"
-        previous_spec = getattr(self, "_mode_spec", None)
-        previous_scope = SCOPE_NONNEGATIVE if previous_spec is None else previous_spec.scope
-        self._mode_spec = mode_spec(
-            "Sz",
-            twoSz=merged[0].twoSz if len(merged) == 1 else None,
-            scope=previous_scope if len(merged) != 1 else SCOPE_NONNEGATIVE,
-        )
-        return self
-
-    def merge_by_sz(self) -> "HubbardModel":
-        """Merge current sectors into one Fock-coordinate block and overwrite self.blocks."""
-        if not getattr(self, "blocks", None):
-            raise RuntimeError("call set_symmetry() first")
-        spec = getattr(self, "_mode_spec", None)
-        if spec is None or spec.mode != "Sz" or spec.twoSz_scope != "all":
-            raise ValueError("merge_by_sz requires MODE=Sz without fixed twoSz")
-
-        sectors = sorted(self.blocks, key=lambda sector: sector.twoSz)
-        for sector in sectors:
-            if sector.eigvals is None or sector.eigvecs is None:
-                raise RuntimeError("call solve() first")
-            if sector.ham is None:
-                raise RuntimeError("merge_by_sz requires solved sectors with ham set")
-            if (
-                sector.twoSz is None
-                or sector.twoS is not None
-                or sector.eta is not None
-                or sector.basis_transform is not None
-            ):
-                raise ValueError("merge_by_sz requires fixed-twoSz blocks without S²/eta transforms")
-        actual_twoSz = {sector.twoSz for sector in sectors}
-        expected_twoSz = set(self._twoSz_values())
-        if actual_twoSz != expected_twoSz:
-            raise ValueError("merge_by_sz requires the complete positive and negative twoSz set")
-
-        basis_states = [state for sector in sectors for state in sector.basis_states]
-        ham = block_diag(*[sector.ham for sector in sectors])
-        eigvecs = block_diag(*[sector.eigvecs for sector in sectors])
-
-        self.blocks = [
-            Block(
-                N=self.N,
-                nelec=self.nelec,
-                basis_states=basis_states,
-                ham=ham,
-                eigvals=np.concatenate([np.asarray(sector.eigvals) for sector in sectors]),
-                eigvecs=eigvecs,
-                twoSz=None,
-                twoS=None,
-                basis_transform=None,
-            )
-        ]
-        self.mode = "full"
-        self._mode_spec = mode_spec("full")
+        self._mode_spec = mode_spec("Sz", twoSz=merged[0].twoSz)
         return self
 
     def project(
@@ -483,7 +459,15 @@ class HubbardModel:
         A = np.vstack([block._spin_operators(bonds) for block in self.blocks])
         b_blocks = [heff.flatten() for heff in self.heff]
         b = np.concatenate(b_blocks)
-        x = np.linalg.lstsq(A, b, rcond=None)[0]
+        try:
+            x = np.linalg.lstsq(A, b, rcond=None)[0]
+        except np.linalg.LinAlgError as exc:
+            raise RuntimeError(
+                f"Spin fit failed for cluster={self.cluster.label()} "
+                f"N={self.N} n_blocks={len(self.blocks)} "
+                f"A_shape={A.shape} b_shape={b.shape} "
+                f"bond_groups={len(bond_groups)}"
+            ) from exc
 
         residual_vector = A @ x - b
         residual = float(np.linalg.norm(residual_vector))

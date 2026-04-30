@@ -49,6 +49,12 @@ class Block:
     def label(self) -> str:
         return self._label(self.twoSz, self.twoS, self.eta)
 
+    def _error_context(self) -> str:
+        return (
+            f"block={self.label()} N={self.N} nelec={self.nelec} "
+            f"twoSz={self.twoSz} twoS={self.twoS} eta={self.eta}"
+        )
+
     def save(self, directory: str | Path) -> None:
         """Save block into `directory`: `{label}_data.npz` + `{label}_label.txt`."""
         directory = Path(directory)
@@ -90,39 +96,57 @@ class Block:
         eta: int | None = None,
     ) -> "Block":
         """Load block `{label}_data.npz` + `{label}_label.txt` from `directory`."""
-        base = Path(directory) / cls._label(twoSz, twoS, eta)
-        data = np.load(f"{base}_data.npz")
-        eigvecs = data["eigvecs"] if "eigvecs" in data.files else None
-        ham = data["ham"] if "ham" in data.files else None
-        basis_transform = data["basis_transform"] if "basis_transform" in data.files else None
+        requested_twoSz = twoSz
+        requested_twoS = twoS
+        requested_eta = eta
+        base = Path(directory) / cls._label(requested_twoSz, requested_twoS, requested_eta)
+        corrupted = f"Cached block is corrupted: {base}"
 
-        text = Path(f"{base}_label.txt").read_text()
-        lines = text.splitlines()
-        header_tokens = lines[0].split()
-        # Old header: N nelec twoSz twoS n_states n_eigvals          (6 tokens)
-        # New header: N nelec twoSz twoS eta n_states n_eigvals      (7 tokens)
-        if len(header_tokens) == 6:
-            eta = None
-            n_states = int(header_tokens[4])
-            n_eigvals = int(header_tokens[5])
-        elif len(header_tokens) == 7:
-            eta = None if header_tokens[4] == "all" else int(header_tokens[4])
-            n_states = int(header_tokens[5])
-            n_eigvals = int(header_tokens[6])
-        else:
-            raise ValueError(
-                f"label.txt has {len(header_tokens)} header tokens; expected 6 or 7"
+        try:
+            with np.load(f"{base}_data.npz") as data:
+                eigvecs = data["eigvecs"] if "eigvecs" in data.files else None
+                ham = data["ham"] if "ham" in data.files else None
+                basis_transform = data["basis_transform"] if "basis_transform" in data.files else None
+
+            text = Path(f"{base}_label.txt").read_text()
+            lines = text.splitlines()
+            header_tokens = lines[0].split()
+            # Old header: N nelec twoSz twoS n_states n_eigvals          (6 tokens)
+            # New header: N nelec twoSz twoS eta n_states n_eigvals      (7 tokens)
+            if len(header_tokens) == 6:
+                loaded_eta = None
+                n_states = int(header_tokens[4])
+                n_eigvals = int(header_tokens[5])
+            elif len(header_tokens) == 7:
+                loaded_eta = None if header_tokens[4] == "all" else int(header_tokens[4])
+                n_states = int(header_tokens[5])
+                n_eigvals = int(header_tokens[6])
+            else:
+                raise ValueError
+            N = int(header_tokens[0])
+            nelec = int(header_tokens[1])
+            loaded_twoSz = None if header_tokens[2] == "all" else int(header_tokens[2])
+            loaded_twoS = None if header_tokens[3] == "all" else int(header_tokens[3])
+            loaded_label = cls._label(loaded_twoSz, loaded_twoS, loaded_eta)
+            requested_label = cls._label(requested_twoSz, requested_twoS, requested_eta)
+            body = " ".join(lines[1:]).split()
+            basis_states = [int(x) for x in body[:n_states]]
+            eigvals = (
+                np.array([float(x) for x in body[n_states:n_states + n_eigvals]])
+                if n_eigvals > 0 else None
             )
-        N = int(header_tokens[0])
-        nelec = int(header_tokens[1])
-        twoSz = None if header_tokens[2] == "all" else int(header_tokens[2])
-        twoS = None if header_tokens[3] == "all" else int(header_tokens[3])
-        body = " ".join(lines[1:]).split()
-        basis_states = [int(x) for x in body[:n_states]]
-        eigvals = (
-            np.array([float(x) for x in body[n_states:n_states + n_eigvals]])
-            if n_eigvals > 0 else None
-        )
+        except (OSError, KeyError, IndexError, ValueError):
+            raise ValueError(corrupted) from None
+
+        if loaded_label != requested_label or not _loaded_eigensystem_is_valid(
+            ham=ham,
+            eigvals=eigvals,
+            eigvecs=eigvecs,
+            basis_transform=basis_transform,
+            n_states=len(basis_states),
+            n_eigvals=n_eigvals,
+        ):
+            raise ValueError(corrupted)
 
         return cls(
             N=N,
@@ -131,9 +155,9 @@ class Block:
             ham=ham,
             eigvals=eigvals,
             eigvecs=eigvecs,
-            twoSz=twoSz,
-            twoS=twoS,
-            eta=eta,
+            twoSz=loaded_twoSz,
+            twoS=loaded_twoS,
+            eta=loaded_eta,
             basis_transform=basis_transform,
         )
 
@@ -177,7 +201,13 @@ class Block:
     def solve(self) -> None:
         if self.ham is None:
             raise RuntimeError("Block.solve(): ham is None; call build_hamiltonians() on the model first")
-        eigvals, eigvecs = np.linalg.eigh(self.ham)
+        try:
+            eigvals, eigvecs = np.linalg.eigh(self.ham)
+        except np.linalg.LinAlgError as exc:
+            raise RuntimeError(
+                f"Diagonalization failed for {self._error_context()} "
+                f"ham_shape={self.ham.shape}"
+            ) from exc
         self.eigvals = eigvals
         self.eigvecs = eigvecs
 
@@ -213,7 +243,13 @@ class Block:
                 f"eigenstates, got {len(selected)}."
             )
         s_bd = self.eigvecs[np.ix_(spin_sector_columns, selected)]
-        sigma = np.linalg.svd(s_bd, compute_uv=False)
+        try:
+            sigma = np.linalg.svd(s_bd, compute_uv=False)
+        except np.linalg.LinAlgError as exc:
+            raise RuntimeError(
+                f"T11 SVD failed for {self._error_context()} "
+                f"spin_dim={len(spin_sector_columns)} selected={list(map(int, selected))}"
+            ) from exc
         return float(np.linalg.norm(sigma - 1.0))
 
     def double_occ_expectation(self) -> np.ndarray:
@@ -257,12 +293,31 @@ class Block:
         candidates = candidates.copy()
         spin_cols = self.spin_sector_columns()
         eigvecs_spin = self.eigvecs[spin_cols, :]
+        if not np.all(np.isfinite(eigvecs_spin)):
+            raise RuntimeError(
+                f"Greedy selection failed for {self._error_context()}: "
+                "spin-projected eigvecs contain non-finite values"
+            )
 
-        def _norm(sel) -> float:
-            sigma = np.linalg.svd(eigvecs_spin[:, sel], compute_uv=False)
+        svd_failures = 0
+        first_svd_failure = None
+
+        def _norm(sel, stage: str, selected_pos=None, candidate_pos=None) -> float | None:
+            nonlocal svd_failures, first_svd_failure
+            try:
+                sigma = np.linalg.svd(eigvecs_spin[:, sel], compute_uv=False)
+            except np.linalg.LinAlgError:
+                svd_failures += 1
+                if first_svd_failure is None:
+                    first_svd_failure = {
+                        "stage": stage,
+                        "selected_pos": None if selected_pos is None else int(selected_pos),
+                        "candidate_pos": None if candidate_pos is None else int(candidate_pos),
+                    }
+                return None
             return float(np.linalg.norm(sigma - 1.0))
 
-        best_norm = _norm(selected)
+        best_norm = _norm(selected, "initial")
 
         for selected_pos in range(len(selected)):
             best_candidate_pos = None
@@ -272,12 +327,14 @@ class Block:
                     candidates[candidate_pos],
                     selected[selected_pos],
                 )
-                norm = _norm(selected)
+                norm = _norm(selected, "swap", selected_pos, candidate_pos)
                 selected[selected_pos], candidates[candidate_pos] = (
                     candidates[candidate_pos],
                     selected[selected_pos],
                 )
-                if norm < best_candidate_norm:
+                if norm is None:
+                    continue
+                if best_candidate_norm is None or norm < best_candidate_norm:
                     best_candidate_norm = norm
                     best_candidate_pos = candidate_pos
 
@@ -288,7 +345,17 @@ class Block:
                 )
                 best_norm = best_candidate_norm
 
-        return selected, candidates, best_norm
+        if best_norm is None:
+            raise RuntimeError(
+                f"Greedy selection failed for {self._error_context()}: "
+                f"no valid SVD result after {svd_failures} failed SVD attempt(s)"
+            )
+
+        diagnostics = {
+            "svd_failures": svd_failures,
+            "first_svd_failure": first_svd_failure,
+        }
+        return selected, candidates, best_norm, diagnostics
 
     def selected_greedy(
         self,
@@ -299,15 +366,23 @@ class Block:
         return_info: bool = False,
     ):
         _, _, selected, candidates = self._selection_pool(ratio)
-        initial_norm = self.t11_norm(selected)
-        selected, _, best_norm = self._greedy_swap(selected, candidates)
+        try:
+            initial_norm = self.t11_norm(selected)
+        except RuntimeError as exc:
+            initial_norm = None
+            initial_t11_error = str(exc)
+        else:
+            initial_t11_error = None
+        selected, _, best_norm, greedy_diagnostics = self._greedy_swap(selected, candidates)
         selected = selected.tolist()
         info = {
             "method": "greedy",
             "block": self.label(),
-            "initial_norm": float(initial_norm),
+            "initial_norm": None if initial_norm is None else float(initial_norm),
             "best_norm": float(best_norm),
-            "improved": best_norm < initial_norm,
+            "improved": None if initial_norm is None else best_norm < initial_norm,
+            "initial_t11_error": initial_t11_error,
+            **greedy_diagnostics,
         }
         record = {
             "block": self.label(),
@@ -341,8 +416,24 @@ class Block:
         return_info: bool = False,
     ):
         double_occ, eigvals, selected, candidates = self._selection_pool(ratio)
-        best_selected, best_candidates, best_norm = self._greedy_swap(selected, candidates)
-        initial_norm = float(best_norm)
+        best_selected = None
+        best_candidates = None
+        best_norm = None
+        svd_failures = 0
+        svd_failed_trials = 0
+        first_svd_failure = None
+        try:
+            best_selected, best_candidates, best_norm, greedy_diagnostics = self._greedy_swap(
+                selected,
+                candidates,
+            )
+            svd_failures += int(greedy_diagnostics["svd_failures"])
+            first_svd_failure = greedy_diagnostics["first_svd_failure"]
+        except RuntimeError as exc:
+            initial_svd_error = str(exc)
+        else:
+            initial_svd_error = None
+        initial_norm = None if best_norm is None else float(best_norm)
         failures = 0
         if max_failures is None:
             max_failures = n_trials
@@ -350,21 +441,53 @@ class Block:
         trials = []
         stopped_by = "n_trials"
         for trial in range(n_trials):
+            base_selected = selected if best_selected is None else best_selected
+            base_candidates = candidates if best_candidates is None else best_candidates
             trial_selected, trial_candidates = _randomize_tail(
-                best_selected,
-                best_candidates,
+                base_selected,
+                base_candidates,
                 double_occ,
                 eigvals,
                 rand_frac,
                 ratio_rand_swap,
             )
-            cur_selected, cur_candidates, cur_norm = self._greedy_swap(
-                trial_selected,
-                trial_candidates,
-            )
+            try:
+                cur_selected, cur_candidates, cur_norm, greedy_diagnostics = self._greedy_swap(
+                    trial_selected,
+                    trial_candidates,
+                )
+            except RuntimeError:
+                svd_failed_trials += 1
+                trial_info = {
+                    "trial": trial + 1,
+                    "norm": None,
+                    "best_norm": None if best_norm is None else float(best_norm),
+                    "improved": False,
+                    "failures": failures,
+                    "svd_failed": True,
+                }
+                trials.append(trial_info)
+                record = {
+                    "block": self.label(),
+                    "event": "greedy_multi_trial",
+                    "method": "greedy_multi",
+                    **trial_info,
+                }
+                if info_callback is not None:
+                    info_callback(record)
+                if selection_info_path is not None:
+                    selection_info_path = Path(selection_info_path)
+                    selection_info_path.parent.mkdir(parents=True, exist_ok=True)
+                    with selection_info_path.open("a") as info_file:
+                        info_file.write(json.dumps(record) + "\n")
+                        info_file.flush()
+                continue
+            svd_failures += int(greedy_diagnostics["svd_failures"])
+            if first_svd_failure is None:
+                first_svd_failure = greedy_diagnostics["first_svd_failure"]
 
-            improved = cur_norm < best_norm
-            if cur_norm < best_norm:
+            improved = best_norm is None or cur_norm < best_norm
+            if improved:
                 best_norm = cur_norm
                 best_selected = cur_selected.copy()
                 best_candidates = cur_candidates.copy()
@@ -379,6 +502,8 @@ class Block:
                 "best_norm": float(best_norm),
                 "improved": improved,
                 "failures": failures,
+                "svd_failed": False,
+                "svd_failures": int(greedy_diagnostics["svd_failures"]),
             }
             trials.append(trial_info)
             record = {
@@ -398,6 +523,13 @@ class Block:
             if stopped_by == "max_failures":
                 break
 
+        if best_selected is None or best_candidates is None or best_norm is None:
+            detail = f"; initial_error={initial_svd_error}" if initial_svd_error else ""
+            raise RuntimeError(
+                f"Greedy multi selection failed for {self._error_context()}: "
+                f"no valid SVD result after initial pass and {len(trials)} trial(s){detail}"
+            )
+
         selected_double_occ = double_occ[best_selected]
         sorted_by_occ = _argsort_double_occ(selected_double_occ, eigvals[best_selected])
         selected = best_selected[sorted_by_occ].tolist()
@@ -410,6 +542,9 @@ class Block:
             "n_trials_run": len(trials),
             "max_failures": max_failures,
             "stopped_by": stopped_by,
+            "svd_failures": svd_failures,
+            "svd_failed_trials": svd_failed_trials,
+            "first_svd_failure": first_svd_failure,
             "trials": trials,
         }
         record = {
@@ -483,7 +618,13 @@ class Block:
             )
 
         s_bd = self.eigvecs[np.ix_(spin_sector_columns, selected_eigenstates)]
-        U, sigma, vh = np.linalg.svd(s_bd, full_matrices=False)
+        try:
+            U, sigma, vh = np.linalg.svd(s_bd, full_matrices=False)
+        except np.linalg.LinAlgError as exc:
+            raise RuntimeError(
+                f"Downfold SVD failed for {self._error_context()} "
+                f"spin_dim={len(spin_sector_columns)} selected={selected_eigenstates}"
+            ) from exc
         lam = np.diag(self.eigvals[selected_eigenstates])
         heff = U @ vh @ lam @ vh.conj().T @ U.conj().T
 
@@ -504,6 +645,39 @@ class Block:
         for bond in bonds:
             matrices.append(U_spin.conj().T @ spin_matrix(states, bond) @ U_spin)
         return np.array([matrix.flatten() for matrix in matrices]).T
+
+
+def _loaded_eigensystem_is_valid(
+    *,
+    ham: np.ndarray | None,
+    eigvals: np.ndarray | None,
+    eigvecs: np.ndarray | None,
+    basis_transform: np.ndarray | None,
+    n_states: int,
+    n_eigvals: int,
+) -> bool:
+    try:
+        if ham is None or eigvecs is None or eigvals is None:
+            return False
+        if ham.ndim != 2 or ham.shape[0] != ham.shape[1]:
+            return False
+        n = ham.shape[0]
+        if eigvecs.shape != (n, n) or eigvals.shape != (n,) or n_eigvals != n:
+            return False
+        if basis_transform is not None and basis_transform.shape != (n_states, n):
+            return False
+        for array in (ham, eigvecs, eigvals, basis_transform):
+            if array is not None and not np.all(np.isfinite(array)):
+                return False
+
+        residual = np.matmul(ham, eigvecs)
+        for col, eigval in enumerate(eigvals):
+            residual[:, col] -= eigval * eigvecs[:, col]
+        residual_norm = float(np.linalg.norm(residual))
+        scale = max(1.0, float(np.linalg.norm(ham)), float(np.linalg.norm(eigvals)))
+        return residual_norm / scale <= ATOL["loose"]
+    except (TypeError, ValueError, FloatingPointError):
+        return False
 
 
 def _argsort_double_occ(double_occ, eigvals=None):

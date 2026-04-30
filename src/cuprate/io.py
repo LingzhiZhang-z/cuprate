@@ -371,6 +371,8 @@ def _run_params_json(
         "twoS": None if params.twoS is None else int(params.twoS),
         "SCOPE": params.scope,
         "workflow": params.workflow,
+        "MERGE": params.merge,
+        "MERGE_BASIS": params.merge_basis,
         "ROOT": str(params.root),
         "parameter_token": parameter_token(params.N, params.N, params.U, params.t),
         "mode_token": mode_token(
@@ -379,7 +381,11 @@ def _run_params_json(
             twoS=params.twoS,
             scope=params.scope,
         ),
-        "workflow_token": workflow_token(params.workflow),
+        "workflow_token": workflow_token(
+            params.workflow,
+            merge=params.merge,
+            merge_basis=params.merge_basis,
+        ),
         "data_dir": str(
             main_data_dir(params.root, params.N, params.N, params.U, params.t, params.mode)
         ),

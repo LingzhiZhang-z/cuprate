@@ -195,6 +195,8 @@ MUST:
       "twoS": null,
       "SCOPE": "nonnegative",
       "workflow": "greedy",
+      "MERGE": "none",
+      "MERGE_BASIS": null,
       "parameter_token": "N_4_nelec_4_U_1.0000_t_0.2400",
       "mode_token": "mode_full",
       "workflow_token": "workflow_greedy"

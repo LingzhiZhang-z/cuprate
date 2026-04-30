@@ -162,44 +162,49 @@ Validation:
 - In `MODE=SzS2eta2`, each produced block must have `eta == 0` and satisfy
   `U.conj().T @ eta2 @ U == 0` within tolerance.
 
-## 6) Full Spectrum Reconstruction (MUST)
+## 6) Merge To Fixed Sz Blocks (MUST)
 
 MUST:
 - Sector eigensystems stay as `Block` objects until the caller explicitly merges them.
-- `HubbardModel.merge_by_s2()` merges all `twoS` sectors with the same `twoSz`
-  by building block-diagonal sector matrices and transforming them back to the
-  fixed-`twoSz` Fock basis.
-- `HubbardModel.merge_by_sz()` merges all fixed-`twoSz` Fock-coordinate blocks
-  into one full Fock-coordinate block only when the model contains the complete
-  valid positive and negative `twoSz` set.
+- `HubbardModel.merge_to_sz(merge_basis)` merges all selected `twoS` sectors
+  at one fixed `twoSz` into one fixed-`twoSz` block.
+- `merge_basis="fock"` stores eigenvectors in fixed-`twoSz` Fock row
+  coordinates and sets `basis_transform=None`.
+- `merge_basis="block"` keeps block-coordinate eigenvectors and stores a
+  column-concatenated `basis_transform` from the merged block coordinates to
+  the fixed-`twoSz` Fock rows.
+- The production runtime supports `MERGE=Sz` only for `MODE=SzS2` and
+  `MODE=SzS2eta2` runs with fixed `twoSz` and without fixed `twoS`.
+- The production runtime does not provide Sz-to-full reconstruction.
 
 Code form:
 ```python
-model.merge_by_s2()  # SzS2 -> Sz frame; SzS2eta2 only after all eta sectors exist
-model.merge_by_sz()  # Sz -> full frame
+model.merge_to_sz("fock")   # eigvecs are in fixed-twoSz Fock rows
+model.merge_to_sz("block")  # eigvecs remain in merged block coordinates
 ```
 
 Validation:
-- Reconstructed eigenvalue count must equal full Hilbert-space dimension $\binom{2N}{N}$.
-- Reconstruction from the default `SCOPE=nonnegative` block set must fail.
+- Merged `SzS2` block labels omit `twoS`.
+- Merged `SzS2eta2` block labels omit `twoS` and keep `eta=0`.
+- `MERGE=Sz` with fixed `twoS`, `MODE=Sz`, or `MODE=full` must fail.
 
 ## 7) Diagonalisation Modes (MUST)
 
 MUST:
 - The code supports exactly four `MODE` values plus optional block selectors:
 
-| CLI input | Blocks before optional merge | Optional reconstruction |
+| CLI input | Blocks before optional merge | Optional merge |
 |-----------|------------------------------|-------------------------|
 | `MODE=full` | one full Fock block | N/A |
 | `MODE=Sz twoSz=<value>` | one fixed-`twoSz` block | No |
-| `MODE=Sz` | fixed-`twoSz` blocks with `twoSz >= 0` | No full reconstruction |
-| `MODE=Sz SCOPE=pm` | all fixed-`twoSz` blocks | `merge_by_sz()` |
+| `MODE=Sz` | fixed-`twoSz` blocks with `twoSz >= 0` | No |
+| `MODE=Sz SCOPE=pm` | all fixed-`twoSz` blocks | No |
 | `MODE=SzS2 twoSz=<value> twoS=<value>` | one fixed-`(twoSz,twoS)` block | No |
-| `MODE=SzS2 twoSz=<value>` | all `twoS` blocks at one fixed `twoSz` | optional `merge_by_s2()` |
+| `MODE=SzS2 twoSz=<value>` | all `twoS` blocks at one fixed `twoSz` | optional `MERGE=Sz` |
 | `MODE=SzS2` | fixed-`(twoSz,twoS)` blocks with `twoSz >= 0` | No full reconstruction |
-| `MODE=SzS2 SCOPE=pm` | all fixed-`(twoSz,twoS)` blocks | `merge_by_s2()` then `merge_by_sz()` |
+| `MODE=SzS2 SCOPE=pm` | all fixed-`(twoSz,twoS)` blocks | No full reconstruction |
 | `MODE=SzS2eta2 twoSz=<value> twoS=<value>` | one fixed-`(twoSz,twoS,eta=0)` block | No |
-| `MODE=SzS2eta2 twoSz=<value>` | all `twoS` blocks at one fixed `twoSz`, each refined to `eta=0` | No |
+| `MODE=SzS2eta2 twoSz=<value>` | all `twoS` blocks at one fixed `twoSz`, each refined to `eta=0` | optional `MERGE=Sz` |
 | `MODE=SzS2eta2` | default-scope fixed-`(twoSz,twoS,eta=0)` blocks | No full reconstruction |
 | `MODE=SzS2eta2 SCOPE=pm` | all fixed-`(twoSz,twoS,eta=0)` blocks for all positive and negative `twoSz` | No full reconstruction until nonzero eta sectors are supported |
 

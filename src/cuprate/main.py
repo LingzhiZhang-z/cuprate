@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from cuprate.cli import COMMON_KEYS, parse_common_runtime, parse_key_values, parse_optional_int
+from cuprate.paths import canonical_merge, canonical_merge_basis
 from cuprate.workchain import WorkchainParams, run_workchain
 
 
@@ -15,6 +16,8 @@ MAIN_KEYS = {
     "n_trials": "N_TRIALS",
     "max_failures": "MAX_FAILURES",
     "seed_results": "SEED_RESULTS",
+    "merge": "MERGE",
+    "merge_basis": "MERGE_BASIS",
 }
 
 
@@ -55,6 +58,20 @@ def parse_args(argv: list[str]) -> WorkchainParams:
     if common.workflow != "adiabatic" and seed_results is not None:
         raise ValueError("SEED_RESULTS applies only to workflow=adiabatic")
 
+    merge = canonical_merge(raw.get("MERGE"))
+    if merge == "none":
+        if "MERGE_BASIS" in raw:
+            raise ValueError("MERGE_BASIS applies only when MERGE=Sz")
+        merge_basis = None
+    else:
+        merge_basis = canonical_merge_basis(raw.get("MERGE_BASIS"))
+        if common.mode not in {"SzS2", "SzS2eta2"}:
+            raise ValueError("MERGE=Sz applies only to MODE=SzS2 or MODE=SzS2eta2")
+        if common.twoSz is None:
+            raise ValueError("MERGE=Sz requires fixed twoSz")
+        if common.twoS is not None:
+            raise ValueError("MERGE=Sz requires all twoS sectors; do not set twoS")
+
     return WorkchainParams(
         N=common.N,
         U=common.U,
@@ -70,6 +87,8 @@ def parse_args(argv: list[str]) -> WorkchainParams:
         n_trials=n_trials,
         max_failures=max_failures,
         seed_results=seed_results,
+        merge=merge,
+        merge_basis=merge_basis,
     )
 
 

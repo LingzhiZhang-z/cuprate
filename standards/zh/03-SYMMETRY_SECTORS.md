@@ -82,40 +82,50 @@ U = transforms[(twoSz, twoS)]
 H_S2 = U.conj().T @ H_Sz @ U
 ```
 
-## 5) 全谱重构 (MUST)
+## 5) 合并到固定 Sz 块 (MUST)
 
 MUST:
 - 扇区本征系统保持为 `Block` 对象，直到调用者显式合并它们。
-- `HubbardModel.merge_by_s2()` 合并同一 `twoSz` 下的所有 `twoS` 扇区：
-  先构造块对角的扇区矩阵，再变换回固定 `twoSz` 的 Fock 基。
-- `HubbardModel.merge_by_sz()` 只有在模型包含完整合法的正负 `twoSz`
-  集合时，才将所有固定 `twoSz` 的 Fock 坐标块合并成一个完整 Fock 坐标块。
+- `HubbardModel.merge_to_sz(merge_basis)` 将一个固定 `twoSz` 下所有选中的
+  `twoS` 扇区合并成一个固定 `twoSz` 块。
+- `merge_basis="fock"` 将本征矢存储在固定 `twoSz` 的 Fock 行坐标中，并令
+  `basis_transform=None`。
+- `merge_basis="block"` 保留块坐标下的本征矢，并将各 sector transform 按列
+  拼接成 `basis_transform`。
+- 生产运行时只在固定 `twoSz` 且没有固定 `twoS` 的 `MODE=SzS2` 和
+  `MODE=SzS2eta2` 运行中支持 `MERGE=Sz`。
+- 生产运行时不提供 Sz 到 full 的重构。
 
 Code form:
 ```python
-model.merge_by_s2()  # SzS2 -> Sz frame
-model.merge_by_sz()  # Sz -> full frame
+model.merge_to_sz("fock")   # eigvecs 位于 fixed-twoSz Fock 行
+model.merge_to_sz("block")  # eigvecs 保持在 merged block 坐标
 ```
 
 Validation:
-- 重构的本征值数量必须等于完整 Hilbert 空间维度 $\binom{2N}{N}$。
-- 从默认 `SCOPE=nonnegative` block 集合出发的重构必须失败。
+- 合并后的 `SzS2` block label 不包含 `twoS`。
+- 合并后的 `SzS2eta2` block label 不包含 `twoS`，但保留 `eta=0`。
+- 固定 `twoS`、`MODE=Sz` 或 `MODE=full` 下使用 `MERGE=Sz` 必须失败。
 
 ## 6) 对角化模式 (MUST)
 
 MUST:
-- 代码支持恰好三种 `MODE` 值，以及可选 block selector：
+- 代码支持恰好四种 `MODE` 值，以及可选 block selector：
 
-| CLI 输入 | 可选合并前的块 | 可选重构 |
+| CLI 输入 | 可选合并前的块 | 可选合并 |
 |----------|----------------|----------|
 | `MODE=full` | 一个完整 Fock 块 | 不适用 |
 | `MODE=Sz twoSz=<value>` | 一个固定 `twoSz` 块 | 否 |
-| `MODE=Sz` | `twoSz >= 0` 的固定 `twoSz` 块 | 不做 full 重构 |
-| `MODE=Sz SCOPE=pm` | 所有固定 `twoSz` 块 | `merge_by_sz()` |
+| `MODE=Sz` | `twoSz >= 0` 的固定 `twoSz` 块 | 否 |
+| `MODE=Sz SCOPE=pm` | 所有固定 `twoSz` 块 | 否 |
 | `MODE=SzS2 twoSz=<value> twoS=<value>` | 一个固定 `(twoSz,twoS)` 块 | 否 |
-| `MODE=SzS2 twoSz=<value>` | 固定 `twoSz` 下的所有 `twoS` 块 | 可选 `merge_by_s2()` |
+| `MODE=SzS2 twoSz=<value>` | 固定 `twoSz` 下的所有 `twoS` 块 | 可选 `MERGE=Sz` |
 | `MODE=SzS2` | `twoSz >= 0` 的固定 `(twoSz,twoS)` 块 | 不做 full 重构 |
-| `MODE=SzS2 SCOPE=pm` | 所有固定 `(twoSz,twoS)` 块 | 先 `merge_by_s2()`，再 `merge_by_sz()` |
+| `MODE=SzS2 SCOPE=pm` | 所有固定 `(twoSz,twoS)` 块 | 不做 full 重构 |
+| `MODE=SzS2eta2 twoSz=<value> twoS=<value>` | 一个固定 `(twoSz,twoS,eta=0)` 块 | 否 |
+| `MODE=SzS2eta2 twoSz=<value>` | 固定 `twoSz` 下所有 `twoS` 块，且均细分到 `eta=0` | 可选 `MERGE=Sz` |
+| `MODE=SzS2eta2` | 默认 scope 的固定 `(twoSz,twoS,eta=0)` 块 | 不做 full 重构 |
+| `MODE=SzS2eta2 SCOPE=pm` | 所有正负 `twoSz` 下的固定 `(twoSz,twoS,eta=0)` 块 | 非零 eta 扇区支持前不做 full 重构 |
 
 - Projection 和 spin fitting 都在当前 `Block` 坐标框架内逐块执行。
   S2 分辨的模式本身不禁止拟合；调用者负责选择能回答目标物理问题的块框架。
