@@ -71,7 +71,7 @@ class WorkchainParams:
     scope: str
     workflow: str
     root: Path
-    cache_mode: str = "save"
+    cache_mode: str = "solve"
     ratio: int | None = None
     n_trials: int | None = None
     max_failures: int | None = None
@@ -88,6 +88,8 @@ def run_workchain(params: WorkchainParams) -> dict[str, Any] | None:
             f"workflow={params.workflow!r} is not supported in this workchain; "
             "use one of occ, energy, greedy, greedy_multi, adiabatic"
         )
+    if params.merge != "none":
+        raise ValueError("MERGE=Sz is currently disabled")
 
     seed_context = _load_adiabatic_seed_context(params)
     output_dir = workflow_dir(
@@ -194,15 +196,9 @@ def _process_family(
         model = HubbardModel(representative, params.U, params.t)
         model.set_symmetry(params.mode, twoSz=params.twoSz, twoS=params.twoS, scope=params.scope)
         model.build_hamiltonians()
-        cache_dir = (
-            main_data_dir(params.root, params.N, params.N, params.U, params.t, params.mode)
-            if params.cache_mode != "none"
-            else None
-        )
+        cache_dir = main_data_dir(params.root, params.N, params.N, params.U, params.t, params.mode)
         model.solve(cache_mode=params.cache_mode, cache_dir=cache_dir, eigh=params.eigh)
-        if params.merge == "Sz":
-            model.merge_to_sz(params.merge_basis or "fock")
-        # Cache save/load is complete; projection and fit do not need ham.
+        # Eigensystem cache work is complete; projection and fit do not need ham.
         for block in model.blocks:
             block.ham = None
 
@@ -212,7 +208,6 @@ def _process_family(
         artifact_name = family_projection_file(hole, class_idx)
         artifact_path = artifacts_dir / artifact_name
         write_projection_npz(artifact_path, model)
-        # The artifact has captured eigvecs_fock; fit/output only need Heff and spin bases.
         for block in model.blocks:
             block.eigvals = None
             block.eigvecs = None

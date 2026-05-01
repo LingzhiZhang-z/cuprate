@@ -47,36 +47,43 @@ model.merge_to_sz("block")  # 在 merged block 坐标中合并 twoS 扇区
   `twoSz >= 0`，`SCOPE=pm` 构造正负 `twoSz`。
 - `MODE=SzS2eta2` 先遵循 `MODE=SzS2` 的 block 选择规则，再将每个选中的
   `(twoSz,twoS)` block 细分到 `eta=0`。
+- `MODE=SzS2` 和 `MODE=SzS2eta2` block 将 symmetry transform 存为
+  fixed-`D` 小块。`build_hamiltonians()` 消费所有 `D` 小块，然后只保留
+  `D=0` transform matrix 以及 `D` column metadata。
 - `MERGE=Sz` 只接受固定 `twoSz`、不固定 `twoS` 的 `MODE=SzS2` 和
   `MODE=SzS2eta2` 运行。`MERGE_BASIS` 为 `fock` 或 `block`。
 
 ## 3) 本征系统 Cache (MUST)
 
 MUST:
-- solve cache 只存储已求解的 blocks：basis states、本征值、本征向量，
-  以及可选 `basis_transform`；不存储 Hamiltonian。
+- solve cache 只存储已求解的 blocks：basis states、本征值和本征向量；
+  不存储 Hamiltonian 或 `basis_transform`。
 - solve cache 不存储 selected indices、`H_eff`、`T11` 或 fit 结果。
-- `HubbardModel.solve()` 精确支持四种 cache mode：
+- `HubbardModel.solve()` 精确支持三种 cache mode：
 
 | cache_mode | 行为 |
 |------------|------|
-| `none` | 在内存中求解每个当前 block；不使用磁盘 cache |
-| `load` | 从磁盘加载每个当前 block；缺任何 block 都失败 |
-| `save` | 求解每个当前 block，然后保存每个 block |
-| `partial` | 加载已有 block，并求解/保存缺失 block |
+| `read` | 从 cache 读取每个当前 block；缺任何 block 都失败 |
+| `solve` | 求解每个当前 block，并保存到 cache |
+| `auto` | cache 读取成功就读；读取失败则求解并保存 |
 
-- `load`、`save` 和 `partial` 需要 `cache_dir`；`none` 禁止传入 `cache_dir`。
+- 所有 cache mode 都需要 `cache_dir`。
 - `EIGH=lowmem|fast` 为新求解的 blocks 选择 dense diagonalisation driver；
   对从 cache 读取的 blocks 无影响。
-- runtime/workchain 调用方默认 `CACHE_MODE` 为 `save`。
+- runtime/workchain 调用方默认 `CACHE_MODE` 为 `solve`。
 - runtime/workchain 调用方默认 `EIGH` 为 `lowmem`。
-- `HubbardModel.save(cache_dir)` 和 `Block.save(cache)` 必须写出同一种已求解 block 格式。
+- `HubbardModel.solve()` 不构建 Hamiltonian。求解路径消费
+  `build_hamiltonians()` 已经赋给 block 的 Hamiltonian。
+- `Block.save(cache)` 写出已求解 block cache 格式。
+- block-level cache 读取必须保留当前由 `set_symmetry()` 构造的 runtime block，
+  只把 cache 中的本征值/本征向量复制进去。
 
 Code form:
 ```python
 cache = Path(cache_dir) / cluster.label()
+block.solve(eigh=eigh)
 block.save(cache)
-block = Block.load(cache, twoSz, twoS, eta)
+block.load(cache)
 ```
 
 - 运行时路径构造集中在 `cuprate.paths`。
@@ -85,11 +92,12 @@ block = Block.load(cache, twoSz, twoS, eta)
   - `DATA_twoSz`：`MODE=Sz`，默认 scope 和 `SCOPE=pm` 共享。
   - `DATA_twoSz_twoS`：`MODE=SzS2`，默认 scope 和 `SCOPE=pm` 共享。
 - `SCOPE=pm` 不创建单独的本征系统 cache 目录。它复用按 block key
-  区分的同一 cache，并可通过 `CACHE_MODE=partial` 补齐缺失 block。
+  区分的同一 cache，`CACHE_MODE=auto` 可通过求解无法读取的 block 来补齐或
+  刷新 cache。
 
 Code form:
 ```text
-ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/DATA_twoSz/hole0_class0_idx0/twoSz_0_data.npz
+ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/DATA_twoSz/hole0_class0_idx0/twoSz_0_eigvecs.npz
 ```
 
 ## 4) Workchain 计算模型 (MUST)
@@ -148,7 +156,7 @@ MUST:
     all-`twoSz` 的 `MODE=Sz` / `MODE=SzS2` 运行。
   - `workflow`：`occ`、`energy`、`greedy`、`greedy_multi`、`adiabatic` 之一；
     默认 `occ`。
-  - `CACHE_MODE`：`none`、`load`、`save`、`partial` 之一；默认 `save`。
+  - `CACHE_MODE`：`read`、`solve`、`auto` 之一；默认 `solve`。
   - `ROOT`：所有 `block_main`、`block_lce` 和 `block_embed` 输出的根目录；
     默认 `results`。
   - `SEED_RESULTS`：前一 `results.json`，仅 `workflow=adiabatic` 时必须提供。

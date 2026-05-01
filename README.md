@@ -7,6 +7,18 @@ The active production pipeline is:
 main  ->  lce  ->  embed
 ```
 
+## Experimental Memory-Optimized Version
+
+This branch is an experimental memory-optimized version and is not recommended
+for general scientific production calculations.
+
+It was changed for rapid deployment under tight memory limits. The current
+implementation applies aggressive memory release around diagonalization and
+cache handling, which reduces runtime stability and downstream artifact
+guarantees. In this version, the intended correctness guarantee is limited to
+the cached eigensystem data: `eigvals`, `eigvecs`, and the saved symmetry
+transforms.
+
 - `main` runs ED, projection, downfolding, and spin-coupling fitting for the
   complete cluster-family set at a given `N, U, T`.
 - `lce` reads a `SEED_SET` text file listing main outputs for consecutive

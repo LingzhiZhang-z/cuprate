@@ -23,7 +23,16 @@ from cuprate.states import (
 
 __all__ = [
     "Block",
+    "DTransform",
 ]
+
+
+@dataclass
+class DTransform:
+    D: int
+    fock_rows: np.ndarray
+    sector_columns: np.ndarray
+    matrix: np.ndarray | None
 
 
 @dataclass
@@ -37,7 +46,7 @@ class Block:
     twoSz: int | None = None
     twoS: int | None = None
     eta: int | None = None
-    basis_transform: np.ndarray | None = None
+    transforms_by_D: dict[int, DTransform] | None = None
 
     @staticmethod
     def _label(
@@ -57,24 +66,21 @@ class Block:
         )
 
     def save(self, directory: str | Path) -> None:
-        """Save block into `directory`: `{label}_data.npz` + `{label}_label.txt`."""
+        """Save block into `directory`: `{label}_eigvecs.npz` + `{label}_label.txt`."""
+        if self.eigvals is None or self.eigvecs is None:
+            raise RuntimeError("call solve() first")
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         base = directory / self.label()
 
-        arrays: dict[str, np.ndarray] = {}
-        if self.eigvecs is not None:
-            arrays["eigvecs"] = np.asarray(self.eigvecs)
-        if self.basis_transform is not None:
-            arrays["basis_transform"] = np.asarray(self.basis_transform)
-        np.savez_compressed(f"{base}_data.npz", **arrays)
+        np.savez_compressed(f"{base}_eigvecs.npz", eigvecs=np.asarray(self.eigvecs))
 
         states = list(self.basis_states)
         state_width = max((len(str(s)) for s in states), default=1)
         twoSz_str = "all" if self.twoSz is None else str(self.twoSz)
         twoS_str = "all" if self.twoS is None else str(self.twoS)
         eta_str = "all" if self.eta is None else str(self.eta)
-        eigvals = np.real_if_close(np.asarray(self.eigvals)) if self.eigvals is not None else np.array([])
+        eigvals = np.real_if_close(np.asarray(self.eigvals))
 
         header = f"{self.N} {self.nelec} {twoSz_str} {twoS_str} {eta_str} {len(states)} {len(eigvals)}"
 
@@ -86,77 +92,107 @@ class Block:
             lines.append(" ".join(f"{float(v):24.15e}" for v in eigvals[i:i + 10]))
         Path(f"{base}_label.txt").write_text("\n".join(lines) + "\n")
 
-    @classmethod
-    def load(
-        cls,
-        directory: str | Path,
-        twoSz: int | None = None,
-        twoS: int | None = None,
-        eta: int | None = None,
-    ) -> "Block":
-        """Load block `{label}_data.npz` + `{label}_label.txt` from `directory`."""
-        requested_twoSz = twoSz
-        requested_twoS = twoS
-        requested_eta = eta
-        base = Path(directory) / cls._label(requested_twoSz, requested_twoS, requested_eta)
+    def load(self, directory: str | Path) -> None:
+        """Load block `{label}_eigvecs.npz` + `{label}_label.txt` from `directory`."""
+        base = Path(directory) / self.label()
         corrupted = f"Cached block is corrupted: {base}"
 
         try:
-            with np.load(f"{base}_data.npz") as data:
-                eigvecs = data["eigvecs"] if "eigvecs" in data.files else None
-                basis_transform = data["basis_transform"] if "basis_transform" in data.files else None
+            with np.load(f"{base}_eigvecs.npz") as data:
+                eigvecs = data["eigvecs"]
 
             text = Path(f"{base}_label.txt").read_text()
             lines = text.splitlines()
             header_tokens = lines[0].split()
-            # Old header: N nelec twoSz twoS n_states n_eigvals          (6 tokens)
-            # New header: N nelec twoSz twoS eta n_states n_eigvals      (7 tokens)
-            if len(header_tokens) == 6:
-                loaded_eta = None
-                n_states = int(header_tokens[4])
-                n_eigvals = int(header_tokens[5])
-            elif len(header_tokens) == 7:
-                loaded_eta = None if header_tokens[4] == "all" else int(header_tokens[4])
-                n_states = int(header_tokens[5])
-                n_eigvals = int(header_tokens[6])
-            else:
+            if len(header_tokens) != 7:
                 raise ValueError
             N = int(header_tokens[0])
             nelec = int(header_tokens[1])
             loaded_twoSz = None if header_tokens[2] == "all" else int(header_tokens[2])
             loaded_twoS = None if header_tokens[3] == "all" else int(header_tokens[3])
-            loaded_label = cls._label(loaded_twoSz, loaded_twoS, loaded_eta)
-            requested_label = cls._label(requested_twoSz, requested_twoS, requested_eta)
+            loaded_eta = None if header_tokens[4] == "all" else int(header_tokens[4])
+            n_states = int(header_tokens[5])
+            n_eigvals = int(header_tokens[6])
+            loaded_label = type(self)._label(loaded_twoSz, loaded_twoS, loaded_eta)
             body = " ".join(lines[1:]).split()
             basis_states = [int(x) for x in body[:n_states]]
-            eigvals = (
-                np.array([float(x) for x in body[n_states:n_states + n_eigvals]])
-                if n_eigvals > 0 else None
-            )
+            eigvals = np.array([float(x) for x in body[n_states:n_states + n_eigvals]])
         except (OSError, KeyError, IndexError, ValueError):
             raise ValueError(corrupted) from None
 
-        if loaded_label != requested_label or not _loaded_eigensystem_is_valid(
-            eigvals=eigvals,
-            eigvecs=eigvecs,
-            basis_transform=basis_transform,
-            n_states=len(basis_states),
-            n_eigvals=n_eigvals,
+        if (
+            loaded_label != self.label()
+            or N != self.N
+            or nelec != self.nelec
+            or basis_states != self.basis_states
+            or not _loaded_eigensystem_is_valid(
+                eigvals=eigvals,
+                eigvecs=eigvecs,
+                n_states=len(basis_states),
+                n_eigvals=n_eigvals,
+            )
         ):
             raise ValueError(corrupted)
 
-        return cls(
-            N=N,
-            nelec=nelec,
-            basis_states=basis_states,
-            ham=None,
-            eigvals=eigvals,
-            eigvecs=eigvecs,
-            twoSz=loaded_twoSz,
-            twoS=loaded_twoS,
-            eta=loaded_eta,
-            basis_transform=basis_transform,
-        )
+        self.ham = None
+        self.eigvals = eigvals
+        self.eigvecs = eigvecs
+
+    def save_transforms(self, directory: str | Path) -> None:
+        """Save this block's fixed-D transform pieces."""
+        if self.transforms_by_D is None:
+            return
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        base = directory / self.label()
+
+        arrays: dict[str, np.ndarray] = {
+            "D_values": np.asarray(sorted(self.transforms_by_D), dtype=int),
+        }
+        for D in sorted(self.transforms_by_D):
+            transform = self.transforms_by_D[D]
+            if transform.matrix is None:
+                raise RuntimeError(
+                    f"Cannot save discarded transform matrix for block={self.label()} D={D}"
+                )
+            prefix = f"D_{D}"
+            arrays[f"{prefix}_fock_rows"] = np.asarray(transform.fock_rows, dtype=int)
+            arrays[f"{prefix}_sector_columns"] = np.asarray(transform.sector_columns, dtype=int)
+            arrays[f"{prefix}_matrix"] = np.asarray(transform.matrix)
+        np.savez_compressed(f"{base}_transform.npz", **arrays)
+
+    def load_transforms(self, directory: str | Path) -> None:
+        """Load this block's fixed-D transform pieces."""
+        if self.transforms_by_D is None:
+            return
+        base = Path(directory) / self.label()
+        corrupted = f"Cached block transform is corrupted: {base}_transform.npz"
+        try:
+            with np.load(f"{base}_transform.npz") as data:
+                D_values = [int(D) for D in data["D_values"]]
+                transforms = {}
+                for D in D_values:
+                    prefix = f"D_{D}"
+                    transforms[D] = DTransform(
+                        D=D,
+                        fock_rows=np.asarray(data[f"{prefix}_fock_rows"], dtype=int),
+                        sector_columns=np.asarray(data[f"{prefix}_sector_columns"], dtype=int),
+                        matrix=np.asarray(data[f"{prefix}_matrix"]),
+                    )
+        except (OSError, KeyError, ValueError):
+            raise ValueError(corrupted) from None
+
+        if self.transforms_by_D is not None:
+            if set(transforms) != set(self.transforms_by_D):
+                raise ValueError(corrupted)
+            for D, transform in transforms.items():
+                current = self.transforms_by_D[D]
+                if (
+                    not np.array_equal(transform.fock_rows, current.fock_rows)
+                    or not np.array_equal(transform.sector_columns, current.sector_columns)
+                ):
+                    raise ValueError(corrupted)
+        self.transforms_by_D = transforms
 
     @classmethod
     def exists(
@@ -167,10 +203,12 @@ class Block:
         eta: int | None = None,
     ) -> bool:
         base = Path(directory) / cls._label(twoSz, twoS, eta)
-        return Path(f"{base}_data.npz").exists() and Path(f"{base}_label.txt").exists()
+        return Path(f"{base}_eigvecs.npz").exists() and Path(f"{base}_label.txt").exists()
 
     def eigenstate_twoSz(self) -> np.ndarray:
         """Per-eigenstate 2·<Sz> (rounded to int)."""
+        if self.twoSz is not None and self.eigvals is not None:
+            return np.full(len(self.eigvals), int(self.twoSz), dtype=int)
         ev = self.eigvecs_fock
         op = np.diag([calc_twoSz(state, self.N) for state in self.basis_states]).astype(complex)
         diag = np.real(np.diag(ev.conj().T @ op @ ev))
@@ -178,6 +216,8 @@ class Block:
 
     def eigenstate_twoS(self) -> np.ndarray:
         """Per-eigenstate 2·S derived from ⟨4·S²⟩ = (2S+1)² − 1 (rounded to int)."""
+        if self.twoS is not None and self.eigvals is not None:
+            return np.full(len(self.eigvals), int(self.twoS), dtype=int)
         ev = self.eigvecs_fock
         op = calc_fourS2_matrix(self.basis_states, self.N)
         diag = np.real(np.diag(ev.conj().T @ op @ ev))
@@ -185,19 +225,50 @@ class Block:
 
     def eigenstate_D(self) -> np.ndarray:
         """Per-eigenstate ⟨double-occupation count⟩ (not rounded)."""
-        ev = self.eigvecs_fock
-        op = np.diag([count_double_occ(state, self.N) for state in self.basis_states]).astype(complex)
-        return np.real(np.diag(ev.conj().T @ op @ ev))
+        return self.double_occ_expectation()
 
     def set_hamiltonian(self, ham: np.ndarray) -> None:
-        if self.basis_transform is None:
-            self.ham = ham
+        if self.transforms_by_D is not None:
+            self.ham = self._project_hamiltonian_by_D(ham)
         else:
-            self.ham = self.basis_transform.conj().T @ ham @ self.basis_transform
+            self.ham = ham
+
+    def _project_hamiltonian_by_D(self, ham: np.ndarray) -> np.ndarray:
+        transforms = [self.transforms_by_D[D] for D in sorted(self.transforms_by_D)]
+        n_cols = sum(len(transform.sector_columns) for transform in transforms)
+        dtype = np.result_type(
+            ham,
+            *[transform.matrix for transform in transforms if transform.matrix is not None],
+        )
+        projected = np.zeros((n_cols, n_cols), dtype=dtype)
+        for left in transforms:
+            if left.matrix is None:
+                raise RuntimeError(
+                    "Block.set_hamiltonian(): D transform matrix has been discarded"
+                )
+            left_cols = left.sector_columns
+            for right in transforms:
+                if right.matrix is None:
+                    raise RuntimeError(
+                        "Block.set_hamiltonian(): D transform matrix has been discarded"
+                    )
+                right_cols = right.sector_columns
+                ham_block = ham[np.ix_(left.fock_rows, right.fock_rows)]
+                projected[np.ix_(left_cols, right_cols)] = (
+                    left.matrix.conj().T @ ham_block @ right.matrix
+                )
+        return projected
+
+    def discard_transforms(self) -> None:
+        if self.transforms_by_D is None:
+            return
+        for D, transform in self.transforms_by_D.items():
+            if D != 0:
+                transform.matrix = None
 
     def solve(self, *, eigh: str = "lowmem") -> None:
         if self.ham is None:
-            raise RuntimeError("Block.solve(): ham is None; call build_hamiltonians() on the model first")
+            raise RuntimeError("Block.solve(): ham is None; call set_hamiltonian() first")
         # ev is the low-workspace path; evd is faster but needs larger workspace.
         driver = "evd" if eigh == "fast" else "ev"
         ham = np.asfortranarray(self.ham)
@@ -220,20 +291,40 @@ class Block:
     @property
     def eigvecs_fock(self) -> np.ndarray:
         """Eigvecs lifted into Fock-basis row coordinates."""
-        if self.basis_transform is None:
-            return self.eigvecs
-        return self.basis_transform @ self.eigvecs
+        if self.transforms_by_D is not None:
+            dtype = np.result_type(
+                self.eigvecs,
+                *[
+                    transform.matrix
+                    for transform in self.transforms_by_D.values()
+                    if transform.matrix is not None
+                ],
+            )
+            eigvecs = np.zeros((len(self.basis_states), self.eigvecs.shape[1]), dtype=dtype)
+            for transform in self.transforms_by_D.values():
+                if transform.matrix is None:
+                    continue
+                eigvecs[transform.fock_rows, :] = (
+                    transform.matrix @ self.eigvecs[transform.sector_columns, :]
+                )
+            return eigvecs
+        return self.eigvecs
 
     def spin_fock_rows(self, D=0) -> list[int]:
+        if self.transforms_by_D is not None:
+            transform = self.transforms_by_D.get(int(D))
+            if transform is None:
+                return []
+            return transform.fock_rows.astype(int).tolist()
         return [i for i, state in enumerate(self.basis_states) if count_double_occ(state, self.N) == D]
 
     def spin_sector_columns(self, D=0) -> list[int]:
-        spin_fock_rows = self.spin_fock_rows(D)
-        if self.basis_transform is None:
-            return spin_fock_rows
-        U_spin = self.basis_transform[spin_fock_rows, :]
-        keep = np.linalg.norm(U_spin, axis=0) > ATOL["tight"]
-        return list(np.where(keep)[0])
+        if self.transforms_by_D is not None:
+            transform = self.transforms_by_D.get(int(D))
+            if transform is None:
+                return []
+            return transform.sector_columns.astype(int).tolist()
+        return self.spin_fock_rows(D)
 
     @property
     def spin_dim(self) -> int:
@@ -259,6 +350,15 @@ class Block:
         return float(np.linalg.norm(sigma - 1.0))
 
     def double_occ_expectation(self) -> np.ndarray:
+        if self.transforms_by_D is not None:
+            values = np.zeros(self.eigvecs.shape[1], dtype=np.float64)
+            for D, transform in self.transforms_by_D.items():
+                columns = transform.sector_columns
+                if len(columns) == 0:
+                    continue
+                weights = np.abs(self.eigvecs[columns, :]) ** 2
+                values += float(D) * np.sum(weights, axis=0)
+            return values
         dom = calc_double_occupation_matrix(self.basis_states, self.N)
         eigvecs = self.eigvecs_fock
         return np.real(np.diag(eigvecs.conj().T @ dom @ eigvecs))
@@ -641,10 +741,17 @@ class Block:
         """Columns of [I, S_bond1, S_bond2, ...] flattened on this block's D=0 basis."""
         spin_fock_rows = self.spin_fock_rows()
         spin_sector_columns = self.spin_sector_columns()
-        if self.basis_transform is None:
-            U_spin = np.eye(len(spin_fock_rows), dtype=np.float64)
+        if self.transforms_by_D is not None:
+            transform = self.transforms_by_D.get(0)
+            if transform is None or transform.matrix is None:
+                U_spin = np.zeros(
+                    (len(spin_fock_rows), len(spin_sector_columns)),
+                    dtype=np.float64,
+                )
+            else:
+                U_spin = transform.matrix
         else:
-            U_spin = self.basis_transform[np.ix_(spin_fock_rows, spin_sector_columns)]
+            U_spin = np.eye(len(spin_fock_rows), dtype=np.float64)
 
         states = [self.basis_states[i] for i in spin_fock_rows]
         matrices = [np.eye(len(spin_sector_columns), dtype=np.float64)]
@@ -657,7 +764,6 @@ def _loaded_eigensystem_is_valid(
     *,
     eigvals: np.ndarray | None,
     eigvecs: np.ndarray | None,
-    basis_transform: np.ndarray | None,
     n_states: int,
     n_eigvals: int,
 ) -> bool:
@@ -669,9 +775,9 @@ def _loaded_eigensystem_is_valid(
         n = eigvecs.shape[0]
         if eigvecs.shape != (n, n) or eigvals.shape != (n,) or n_eigvals != n:
             return False
-        if basis_transform is not None and basis_transform.shape != (n_states, n):
+        if n_states < n:
             return False
-        for array in (eigvecs, eigvals, basis_transform):
+        for array in (eigvecs, eigvals):
             if array is not None and not np.all(np.isfinite(array)):
                 return False
 

@@ -74,12 +74,17 @@ MUST:
 - 对每个 $(S_z, S)$ 扇区，最高权基连同反复降阶得到的列向量一起，
   构成从 $S_z$ Fock 基到 $(S_z, S)$ 本征基的酉变换 $U_{S^2}$。
 - $(S_z, S)$ 基中的哈密顿量为 $H_{S^2} = U_{S^2}^\dagger H_{S_z} U_{S^2}$。
+- Runtime `Block` 将 transform 存为显式 fixed-`D` 小块，而不是长期保存一个
+  dense `basis_transform`。
+- `build_hamiltonians()` 消费所有 fixed-`D` transform 小块来组装完整的
+  symmetry-sector Hamiltonian，然后只保留 `D=0` transform matrix 以及
+  projection/fitting 需要的 `D` column metadata。
 
 Code form:
 ```python
-transforms = build_S2_transforms(grouped_states, N, sector_blocks)
-U = transforms[(twoSz, twoS)]
-H_S2 = U.conj().T @ H_Sz @ U
+blocks = blocks_by_sector[(twoSz, twoS)]  # 每个 D 一个 S2SectorBlock
+H_S2[D1, D2] = U_D1.conj().T @ H_Sz[D1, D2] @ U_D2
+U_spin = blocks_by_D[0].transform
 ```
 
 ## 5) 合并到固定 Sz 块 (MUST)

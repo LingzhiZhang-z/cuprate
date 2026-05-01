@@ -49,6 +49,9 @@ model.merge_to_sz("block")  # merge twoS sectors in merged block coordinates
   while `SCOPE=pm` builds both positive and negative `twoSz`.
 - `MODE=SzS2eta2` first follows the `MODE=SzS2` block selection rules, then
   refines each selected `(twoSz,twoS)` block to `eta=0`.
+- `MODE=SzS2` and `MODE=SzS2eta2` blocks store symmetry transforms as fixed-`D`
+  pieces. `build_hamiltonians()` consumes all `D` pieces and then keeps only
+  the `D=0` transform matrix plus `D` column metadata.
 - `MERGE=Sz` is accepted only for fixed-`twoSz` `MODE=SzS2` and
   `MODE=SzS2eta2` runs without fixed `twoS`. `MERGE_BASIS` is `fock` or
   `block`.
@@ -57,33 +60,34 @@ model.merge_to_sz("block")  # merge twoS sectors in merged block coordinates
 
 MUST:
 - The solve cache stores only solved blocks: basis states, eigenvalues,
-  eigenvectors, and optional `basis_transform`; it does not store the
-  Hamiltonian.
+  and eigenvectors. It does not store the Hamiltonian or `basis_transform`.
 - The solve cache does not store selected indices, `H_eff`, `T11`, or fit
   results.
-- `HubbardModel.solve()` supports exactly four cache modes:
+- `HubbardModel.solve()` supports exactly three cache modes:
 
 | cache_mode | Behavior |
 |------------|----------|
-| `none` | Solve every current block in memory; no disk cache |
-| `load` | Load every current block from disk; fail if any block is missing |
-| `save` | Solve every current block, then save every block |
-| `partial` | Load existing blocks and solve/save missing blocks |
+| `read` | Read every current block from cache; fail if any block is missing |
+| `solve` | Solve every current block and save it to cache |
+| `auto` | Read a block if cache loading succeeds; otherwise solve/save it |
 
-- `cache_dir` is required for `load`, `save`, and `partial`, and forbidden for
-  `none`.
+- `cache_dir` is required for all cache modes.
 - `EIGH=lowmem|fast` selects the dense diagonalisation driver for newly solved
   blocks. It has no effect for blocks loaded from cache.
-- Runtime/workchain callers default `CACHE_MODE` to `save`.
+- Runtime/workchain callers default `CACHE_MODE` to `solve`.
 - Runtime/workchain callers default `EIGH` to `lowmem`.
-- `HubbardModel.save(cache_dir)` and `Block.save(cache)` must write the same
-  solved block format.
+- `HubbardModel.solve()` does not build Hamiltonians. Solve paths consume the
+  block Hamiltonians assigned by `build_hamiltonians()`.
+- `Block.save(cache)` writes the solved block cache format.
+- Block-level cache reads must preserve the current runtime block constructed by
+  `set_symmetry()` and copy only cached eigenvalues/eigenvectors into it.
 
 Code form:
 ```python
 cache = Path(cache_dir) / cluster.label()
+block.solve(eigh=eigh)
 block.save(cache)
-block = Block.load(cache, twoSz, twoS, eta)
+block.load(cache)
 ```
 
 - Runtime path construction is centralized in `cuprate.paths`.
@@ -94,11 +98,12 @@ block = Block.load(cache, twoSz, twoS, eta)
   - `DATA_twoSz_twoS_eta_0` for `MODE=SzS2eta2`, shared by default and
     `SCOPE=pm`.
 - `SCOPE=pm` does not create a separate eigensystem cache directory. It reuses
-  the same block-keyed cache and may extend it via `CACHE_MODE=partial`.
+  the same block-keyed cache, and `CACHE_MODE=auto` may extend or refresh it by
+  solving blocks whose cache cannot be loaded.
 
 Code form:
 ```text
-ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/DATA_twoSz/hole0_class0_idx0/twoSz_0_data.npz
+ROOT/block_main/N_6_nelec_6_U_1.0000_t_0.0200/DATA_twoSz/hole0_class0_idx0/twoSz_0_eigvecs.npz
 ```
 
 ## 4) Workchain Computation Model (MUST)
@@ -166,8 +171,7 @@ MUST:
     `eta=0` blocks only.
   - `workflow`: one of `occ`, `energy`, `greedy`, `greedy_multi`, `adiabatic`;
     defaults to `occ`.
-  - `CACHE_MODE`: one of `none`, `load`, `save`, `partial`; defaults to
-    `save`.
+  - `CACHE_MODE`: one of `read`, `solve`, `auto`; defaults to `solve`.
   - `ROOT`: root directory for all `block_main`, `block_lce`, and
     `block_embed` outputs; defaults to `results`.
   - `SEED_RESULTS`: previous `results.json`, required only for

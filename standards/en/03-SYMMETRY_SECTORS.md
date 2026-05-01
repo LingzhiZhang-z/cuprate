@@ -76,12 +76,17 @@ MUST:
 - For each $(S_z, S)$ sector, the highest-weight basis together with repeated lowering
   forms a unitary transform $U_{S^2}$ from the $S_z$ Fock basis to the $(S_z, S)$ eigenbasis.
 - The Hamiltonian in the $(S_z, S)$ basis is $H_{S^2} = U_{S^2}^\dagger H_{S_z} U_{S^2}$.
+- Runtime `Block` objects store the transform as explicit fixed-`D` pieces
+  rather than as one dense long-lived `basis_transform`.
+- `build_hamiltonians()` consumes all fixed-`D` transform pieces to assemble the
+  complete symmetry-sector Hamiltonian, then keeps only the `D=0` transform
+  matrix plus `D` column metadata needed by projection and fitting.
 
 Code form:
 ```python
-transforms = build_S2_transforms(grouped_states, N, sector_blocks)
-U = transforms[(twoSz, twoS)]
-H_S2 = U.conj().T @ H_Sz @ U
+blocks = blocks_by_sector[(twoSz, twoS)]  # one S2SectorBlock per D
+H_S2[D1, D2] = U_D1.conj().T @ H_Sz[D1, D2] @ U_D2
+U_spin = blocks_by_D[0].transform
 ```
 
 ## 5) Half-Filled Eta-Pseudospin Refinement (MUST)
@@ -115,8 +120,9 @@ MUST:
   blocks and refines each one to `eta=0`.
 - A refined block label appends `eta_<value>` after the `(twoSz,twoS)` label,
   for example `twoSz_0_twoS_0_eta_0`.
-- Production code exposes eta only through the sector transform builder
-  `build_S2eta0_sectors(...)` followed by `build_S2eta0_transforms(...)`.
+- Production block construction consumes `build_S2eta0_sectors(...)` directly
+  as fixed-`D` transform pieces. Dense `build_S2eta0_transforms(...)` output is
+  retained only as a reference/helper representation.
 
 Math:
 $$
@@ -145,9 +151,8 @@ grouped_states = group_states(generate_states(N, N), N)
 _hw, multiplets = build_S2_multiplets(grouped_states, N)
 sector_blocks = build_S2_sectors(grouped_states, multiplets)
 eta0_sector_blocks = build_S2eta0_sectors(N, sector_blocks, cluster)
-eta0_transforms = build_S2eta0_transforms(grouped_states, N, eta0_sector_blocks)
-U_S2eta0 = eta0_transforms[(twoSz, twoS, 0)]
-H_S2eta0 = U_S2eta0.conj().T @ H_Sz @ U_S2eta0
+blocks = blocks_by_sector[(twoSz, twoS, 0)]  # one eta=0 S2SectorBlock per D
+H_S2eta0[D1, D2] = U_D1.conj().T @ H_Sz[D1, D2] @ U_D2
 ```
 
 Validation:

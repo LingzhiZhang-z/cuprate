@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from cuprate.cli import COMMON_KEYS, parse_common_runtime, parse_key_values, parse_optional_int
-from cuprate.paths import canonical_merge, canonical_merge_basis
+from cuprate.paths import canonical_merge
 from cuprate.workchain import WorkchainParams, run_workchain
 
 
@@ -38,8 +38,8 @@ def parse_args(argv: list[str]) -> WorkchainParams:
     raw = parse_key_values(argv, {**COMMON_KEYS, **MAIN_KEYS})
     common = parse_common_runtime(raw)
 
-    cache_mode = raw.get("CACHE_MODE", "save").lower()
-    if cache_mode not in {"none", "load", "save", "partial"}:
+    cache_mode = raw.get("CACHE_MODE", "solve").lower()
+    if cache_mode not in {"read", "solve", "auto"}:
         raise ValueError(f"unsupported CACHE_MODE={cache_mode!r}")
     eigh = raw.get("EIGH", "lowmem").lower()
     if eigh not in {"lowmem", "fast"}:
@@ -68,13 +68,7 @@ def parse_args(argv: list[str]) -> WorkchainParams:
             raise ValueError("MERGE_BASIS applies only when MERGE=Sz")
         merge_basis = None
     else:
-        merge_basis = canonical_merge_basis(raw.get("MERGE_BASIS"))
-        if common.mode not in {"SzS2", "SzS2eta2"}:
-            raise ValueError("MERGE=Sz applies only to MODE=SzS2 or MODE=SzS2eta2")
-        if common.twoSz is None:
-            raise ValueError("MERGE=Sz requires fixed twoSz")
-        if common.twoS is not None:
-            raise ValueError("MERGE=Sz requires all twoS sectors; do not set twoS")
+        raise ValueError("MERGE=Sz is currently disabled")
 
     return WorkchainParams(
         N=common.N,

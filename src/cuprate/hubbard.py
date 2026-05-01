@@ -6,23 +6,19 @@ from pathlib import Path
 from typing import Sequence
 
 import numpy as np
-from scipy.linalg import block_diag
 
 from cuprate.clusters import Cluster
-from cuprate.manifold import Block
+from cuprate.manifold import Block, DTransform
 from cuprate.paths import (
     SCOPE_NONNEGATIVE,
     SCOPE_PM,
     ModeSpec,
-    canonical_merge_basis,
     mode_spec,
 )
 from cuprate.sectors import (
     build_S2_multiplets,
     build_S2_sectors,
-    build_S2_transforms,
     build_S2eta0_sectors,
-    build_S2eta0_transforms,
 )
 from cuprate.states import apply_hop, count_double_occ, generate_states, group_states
 
@@ -117,15 +113,25 @@ class HubbardModel:
         hi = min(self.nelec, 2 * self.N - self.nelec)
         return range(lo, hi + 1, 2)
 
-    def _s2_transforms(self) -> dict[tuple[int, int], np.ndarray]:
-        """Build algebraic S² sector transforms keyed by (twoSz, twoS)."""
+    @staticmethod
+    def _sector_blocks_by_key(sector_blocks, *, eta: bool):
+        blocks_by_key = {}
+        for block in sector_blocks:
+            key = (block.twoSz, block.twoS, block.eta) if eta else (block.twoSz, block.twoS)
+            blocks_by_key.setdefault(key, []).append(block)
+        for blocks in blocks_by_key.values():
+            blocks.sort(key=lambda block: block.D)
+        return blocks_by_key
+
+    def _s2_sector_blocks(self):
+        """Build algebraic S² transform blocks keyed by (twoSz, twoS)."""
         grouped_states = group_states(generate_states(self.N, self.nelec), self.N)
         _, multiplets = build_S2_multiplets(grouped_states, self.N)
         sector_blocks = build_S2_sectors(grouped_states, multiplets)
-        return build_S2_transforms(grouped_states, self.N, sector_blocks)
+        return self._sector_blocks_by_key(sector_blocks, eta=False)
 
-    def _s2eta0_transforms(self) -> dict[tuple[int, int, int], np.ndarray]:
-        """Build algebraic S²/eta=0 sector transforms keyed by (twoSz, twoS, eta)."""
+    def _s2eta0_sector_blocks(self):
+        """Build algebraic S²/eta=0 transform blocks keyed by (twoSz, twoS, eta)."""
         grouped_states = group_states(generate_states(self.N, self.nelec), self.N)
         _, multiplets = build_S2_multiplets(grouped_states, self.N)
         sector_blocks = build_S2_sectors(grouped_states, multiplets)
@@ -134,29 +140,73 @@ class HubbardModel:
             sector_blocks,
             self.cluster,
         )
-        return build_S2eta0_transforms(grouped_states, self.N, eta0_sector_blocks)
+        return self._sector_blocks_by_key(eta0_sector_blocks, eta=True)
 
-    def _make_sector(
-        self,
-        twoSz: int | None,
-        twoS: int | None,
-        eta: int | None = None,
-        basis_transform: np.ndarray | None = None,
-    ) -> Block:
-        basis_states = self.build_fock_basis(twoSz=twoSz)
-        if not basis_states:
-            raise ValueError(
-                f"No states exist for twoSz={twoSz} at N={self.N}, nelec={self.nelec}."
+    def _transforms_by_D(self, basis_states, sector_blocks) -> dict[int, DTransform]:
+        basis_map = {state: idx for idx, state in enumerate(basis_states)}
+        transforms: dict[int, DTransform] = {}
+        col_start = 0
+        for block in sorted(sector_blocks, key=lambda item: item.D):
+            coeff = np.asarray(block.transform)
+            col_stop = col_start + coeff.shape[1]
+            if block.D in transforms:
+                raise ValueError(
+                    f"Duplicate D={block.D} transform block for "
+                    f"(twoSz,twoS,eta)=({block.twoSz},{block.twoS},{block.eta})"
             )
+            transforms[block.D] = DTransform(
+                D=block.D,
+                fock_rows=np.asarray(
+                    [basis_map[state] for state in block.basis_states],
+                    dtype=int,
+                ),
+                sector_columns=np.arange(col_start, col_stop, dtype=int),
+                matrix=coeff,
+            )
+            col_start = col_stop
+        return transforms
+
+    def _make_sector(self, twoSz: int | None, twoS: int | None, eta: int | None = None, sector_blocks=None):
+        basis_states = self.build_fock_basis(twoSz=twoSz)
+        transforms_by_D = None
+        if sector_blocks is not None:
+            transforms_by_D = self._transforms_by_D(basis_states, sector_blocks)
         return Block(
             N=self.N,
             nelec=self.nelec,
             basis_states=basis_states,
-            basis_transform=basis_transform,
+            transforms_by_D=transforms_by_D,
             twoSz=twoSz,
             twoS=twoS,
             eta=eta,
         )
+
+    def _block_labels(self, spec: ModeSpec):
+        if spec.twoSz_scope == "none":
+            twoSz_values = [None]
+        elif spec.twoSz_scope == "one":
+            twoSz_values = [spec.twoSz]
+        else:
+            twoSz_values = [
+                twoSz for twoSz in self._twoSz_values()
+                if spec.scope == SCOPE_PM or twoSz >= 0
+            ]
+
+        if spec.twoS_scope == "none":
+            return [(twoSz, None, None) for twoSz in twoSz_values]
+
+        if spec.twoS_scope == "one":
+            twoS_values = [spec.twoS]
+        else:
+            twoS_values = [twoS for twoS in self._twoSz_values() if twoS >= 0]
+
+        eta = 0 if spec.mode == "SzS2eta2" else None
+        labels = []
+        for twoSz in twoSz_values:
+            for twoS in twoS_values:
+                if twoS >= abs(twoSz):
+                    labels.append((twoSz, twoS, eta))
+        return labels
 
     def set_symmetry(
         self,
@@ -167,61 +217,27 @@ class HubbardModel:
         scope: str | None = SCOPE_NONNEGATIVE,
     ) -> "HubbardModel":
         spec = self._validate_mode(mode, twoSz, twoS, scope)
-        sz_scope, s2_scope = spec.twoSz_scope, spec.twoS_scope
-        if s2_scope == "none":
-            transforms = None
+        if spec.twoS_scope == "none":
+            sector_blocks = None
         elif spec.mode == "SzS2eta2":
-            transforms = self._s2eta0_transforms()
+            sector_blocks = self._s2eta0_sector_blocks()
         else:
-            transforms = self._s2_transforms()
-        all_twoSz = list(self._twoSz_values())
-        scoped_twoSz = all_twoSz if spec.scope == SCOPE_PM else [value for value in all_twoSz if value >= 0]
-
-        sz_iter = {
-            "none": [None],
-            "one": [spec.twoSz],
-            "all": scoped_twoSz,
-        }[sz_scope]
-
-        if s2_scope == "none":
-            keys = [(tsz, None, None) for tsz in sz_iter]
-        elif s2_scope == "one":
-            for tsz in sz_iter:
-                if spec.mode == "SzS2eta2":
-                    key = (tsz, spec.twoS, 0)
-                    if key not in transforms:
-                        raise ValueError(
-                            f"No (twoSz, twoS, eta)=({tsz}, {spec.twoS}, 0) block exists "
-                            f"at N={self.N}, nelec={self.nelec}."
-                        )
-                elif (tsz, spec.twoS) not in transforms:
-                    raise ValueError(
-                        f"No (twoSz, twoS)=({tsz}, {spec.twoS}) block exists "
-                        f"at N={self.N}, nelec={self.nelec}."
-                    )
-            keys = [(tsz, spec.twoS, 0 if spec.mode == "SzS2eta2" else None) for tsz in sz_iter]
-        else:
-            sz_set = set(sz_iter)
-            if spec.mode == "SzS2eta2":
-                keys = sorted(k for k in transforms if k[0] in sz_set)
-            else:
-                keys = sorted((tsz, ts, None) for tsz, ts in transforms if tsz in sz_set)
+            sector_blocks = self._s2_sector_blocks()
 
         blocks = []
-        for tsz, ts, eta in keys:
+        for tsz, ts, eta in self._block_labels(spec):
             if ts is None:
-                U = None
+                transform_blocks = None
             elif eta is None:
-                U = transforms[(tsz, ts)]
+                transform_blocks = sector_blocks[(tsz, ts)]
             else:
-                U = transforms[(tsz, ts, eta)]
-            blocks.append(self._make_sector(tsz, ts, eta=eta, basis_transform=U))
+                transform_blocks = sector_blocks[(tsz, ts, eta)]
+            blocks.append(self._make_sector(tsz, ts, eta=eta, sector_blocks=transform_blocks))
         if not blocks:
             raise ValueError("No sectors exist for the requested symmetry selection")
         self.blocks = blocks
         self.mode = spec.mode
         self._mode_spec = spec
-        self._transforms = transforms
         return self
 
     def build_hamiltonians(self) -> "HubbardModel":
@@ -230,8 +246,6 @@ class HubbardModel:
             raise RuntimeError("call set_symmetry() first")
         raw_hams: dict[int | None, np.ndarray] = {}
         for sector in self.blocks:
-            if sector.ham is not None:
-                continue
             key = sector.twoSz
             if key not in raw_hams:
                 raw_hams[key] = self.build_hamiltonian(sector.basis_states)
@@ -241,149 +255,67 @@ class HubbardModel:
     def _cache_dir(self, cache_dir: str | Path) -> Path:
         return Path(cache_dir) / self.cluster.label()
 
-    def load(self, cache_dir: str | Path) -> "HubbardModel":
-        """Load every existing sector from disk; fail instead of partially solving."""
+    def save_transforms(self, cache_dir: str | Path) -> "HubbardModel":
+        """Save current block transforms to the cluster cache directory."""
         if not getattr(self, "blocks", None):
             raise RuntimeError("call set_symmetry() first")
         cache = self._cache_dir(cache_dir)
-        keys = [(sector.twoSz, sector.twoS, sector.eta) for sector in self.blocks]
-        missing = [key for key in keys if not Block.exists(cache, *key)]
-        if missing:
-            labels = ", ".join(f"(twoSz, twoS, eta)={key}" for key in missing)
-            raise FileNotFoundError(f"Missing cached Hubbard blocks in {cache}: {labels}")
-        self.blocks = [Block.load(cache, twoSz, twoS, eta) for twoSz, twoS, eta in keys]
+        for block in self.blocks:
+            block.save_transforms(cache)
         return self
 
-    def save(self, cache_dir: str | Path) -> "HubbardModel":
-        """Save every solved sector to disk."""
+    def load_transforms(self, cache_dir: str | Path) -> "HubbardModel":
+        """Load current block transforms from the cluster cache directory."""
         if not getattr(self, "blocks", None):
             raise RuntimeError("call set_symmetry() first")
         cache = self._cache_dir(cache_dir)
-        for sector in self.blocks:
-            if sector.eigvals is None or sector.eigvecs is None:
-                raise RuntimeError("call solve() first")
-            sector.save(cache)
+        for block in self.blocks:
+            block.load_transforms(cache)
+        return self
+
+    def discard_transforms(self) -> "HubbardModel":
+        """Discard non-spin transform matrices from all current blocks."""
+        if not getattr(self, "blocks", None):
+            raise RuntimeError("call set_symmetry() first")
+        for block in self.blocks:
+            block.discard_transforms()
         return self
 
     def solve(
         self,
         *,
-        cache_mode: str = "none",
+        cache_mode: str = "solve",
         cache_dir: str | Path | None = None,
         eigh: str = "lowmem",
     ) -> "HubbardModel":
-        """Solve sectors using cache_mode: none, load, save, or partial."""
+        """Solve sectors using cache_mode: read, solve, or auto."""
         if not getattr(self, "blocks", None):
             raise RuntimeError("call set_symmetry() first")
 
-        if cache_mode not in {"none", "load", "save", "partial"}:
+        if cache_mode not in {"read", "solve", "auto"}:
             raise ValueError(f"Unsupported cache_mode={cache_mode!r}")
-        if cache_mode == "none" and cache_dir is not None:
-            raise ValueError("cache_dir requires cache_mode='load', 'save', or 'partial'")
-        if cache_mode != "none" and cache_dir is None:
+        if cache_dir is None:
             raise ValueError(f"cache_mode={cache_mode!r} requires cache_dir")
-        if cache_mode == "load":
-            return self.load(cache_dir)
-        if cache_mode == "partial":
-            cache = self._cache_dir(cache_dir)
-            for idx, block in enumerate(self.blocks):
-                if Block.exists(cache, block.twoSz, block.twoS, block.eta):
-                    self.blocks[idx] = Block.load(cache, block.twoSz, block.twoS, block.eta)
-                else:
-                    if block.ham is None:
-                        raise RuntimeError("call build_hamiltonians() first")
+        cache = self._cache_dir(cache_dir)
+        for block in self.blocks:
+            if cache_mode == "read":
+                block.load_transforms(cache)
+                block.load(cache)
+            elif cache_mode == "solve":
+                block.save_transforms(cache)
+                block.solve(eigh=eigh)
+                block.save(cache)
+            else:  # cache_mode == "auto"
+                transforms_by_D = block.transforms_by_D
+                try:
+                    block.load_transforms(cache)
+                    block.load(cache)
+                except ValueError:
+                    block.transforms_by_D = transforms_by_D
+                    block.save_transforms(cache)
                     block.solve(eigh=eigh)
                     block.save(cache)
-            return self
-
-        cache = self._cache_dir(cache_dir) if cache_mode == "save" else None
-        for block in self.blocks:
-            if block.ham is None:
-                raise RuntimeError("call build_hamiltonians() first")
-            block.solve(eigh=eigh)
-            if cache is not None:
-                block.save(cache)
-        return self
-
-    def merge_to_sz(self, merge_basis: str = "fock") -> "HubbardModel":
-        """Merge fixed-(twoSz,twoS[,eta]) sectors into fixed-twoSz blocks."""
-        merge_basis = canonical_merge_basis(merge_basis)
-        if not getattr(self, "blocks", None):
-            raise RuntimeError("call set_symmetry() first")
-        spec = getattr(self, "_mode_spec", None)
-        if (
-            spec is None
-            or spec.mode not in {"SzS2", "SzS2eta2"}
-            or spec.twoSz_scope != "one"
-            or spec.twoS_scope != "all"
-        ):
-            raise ValueError(
-                "merge_to_sz requires MODE=SzS2 or MODE=SzS2eta2 "
-                "with fixed twoSz and without fixed twoS"
-            )
-
-        by_twoSz: dict[int, list[Block]] = {}
-        for sector in self.blocks:
-            if sector.eigvals is None or sector.eigvecs is None:
-                raise RuntimeError("call solve() first")
-            if sector.twoSz is None:
-                raise ValueError("merge_to_sz requires sectors with twoSz set")
-            if sector.twoS is None or sector.basis_transform is None:
-                raise ValueError(
-                    "merge_to_sz requires S²/eta sectors with twoS and basis_transform set"
-                )
-            by_twoSz.setdefault(sector.twoSz, []).append(sector)
-
-        merged: list[Block] = []
-        for twoSz in sorted(by_twoSz):
-            sectors = sorted(
-                by_twoSz[twoSz],
-                key=lambda sector: (
-                    sector.twoS,
-                    -1 if sector.eta is None else sector.eta,
-                ),
-            )
-            first = sectors[0]
-            if any(sector.basis_states != first.basis_states for sector in sectors):
-                raise ValueError("merge_to_sz requires matching fixed-twoSz Fock bases")
-
-            eta_values = {sector.eta for sector in sectors}
-            if eta_values == {None}:
-                merged_eta = None
-            elif eta_values == {0}:
-                merged_eta = 0
-            else:
-                raise ValueError("merge_to_sz requires either no eta refinement or eta=0 sectors")
-
-            U_merged = np.concatenate([sector.basis_transform for sector in sectors], axis=1)
-            sym_eigvecs = block_diag(*[sector.eigvecs for sector in sectors])
-            if U_merged.shape[1] != sym_eigvecs.shape[0]:
-                raise ValueError("merge_to_sz sector transform/eigvec dimensions do not match")
-            if merge_basis == "fock":
-                basis_transform = None
-                eigvecs = U_merged @ sym_eigvecs
-            else:
-                basis_transform = U_merged
-                eigvecs = sym_eigvecs
-
-            merged.append(
-                Block(
-                    N=self.N,
-                    nelec=self.nelec,
-                    basis_states=first.basis_states,
-                    ham=None,
-                    eigvals=np.concatenate([sector.eigvals for sector in sectors]),
-                    eigvecs=eigvecs,
-                    twoSz=twoSz,
-                    twoS=None,
-                    eta=merged_eta,
-                    basis_transform=basis_transform,
-                )
-            )
-
-        self.blocks = merged
-        self.mode = "Sz"
-        self._mode_spec = mode_spec("Sz", twoSz=merged[0].twoSz)
+            block.discard_transforms()
         return self
 
     def project(
